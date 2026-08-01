@@ -196,6 +196,11 @@ grant insert (particle_id)       on public.likes    to authenticated;
 grant insert (particle_id, body) on public.comments to authenticated;
 grant update (read)              on public.notifications to authenticated;
 
+-- Signed-out visitors never delete anything. (RLS already blocks this — the
+-- owner check can't match a null auth.uid() — but don't hand out the privilege.)
+revoke delete on public.profiles, public.particles, public.likes,
+                 public.comments, public.featured, public.notifications from anon;
+
 
 -- ═══ Functions & triggers ═══════════════════════════════════════════════════
 
@@ -310,10 +315,21 @@ $$;
 
 -- Self-service account deletion (cascades: profile → particles → likes/comments).
 create or replace function public.delete_account()
-returns void language sql security definer set search_path = public, pg_temp as $$
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  -- Belt and braces: auth.uid() is null for anon, so the delete would match
+  -- nothing anyway, but a security-definer function should never be reachable
+  -- by an unauthenticated caller at all.
+  if auth.uid() is null then
+    raise exception 'not authenticated' using errcode = '42501';
+  end if;
   delete from auth.users where id = auth.uid();
-$$;
-revoke execute on function public.delete_account() from anon;
+end $$;
+
+-- Postgres grants EXECUTE on new functions to PUBLIC, and `revoke … from anon`
+-- does NOT undo that inherited grant — it has to be revoked from public.
+revoke execute on function public.delete_account() from public, anon;
+grant execute on function public.delete_account() to authenticated;
 
 
 -- ═══ Storage: public "media" bucket (avatars + thumbnails) ══════════════════
