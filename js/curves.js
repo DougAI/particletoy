@@ -1,11 +1,38 @@
-// Curve (piecewise-linear keyframes) and Gradient (color stops) models,
-// plus LUT baking used by the GPU (life-indexed lookup texture).
+// Curve (Hermite-spline keyframes, tangent per key) and Gradient (color
+// stops) models, plus LUT baking used by the GPU (life-indexed lookup texture).
 
 export const LUT_SIZE = 64;
 
-/** curve: {keys: [{t, v}]} sorted by t. */
+/** curve: {keys: [{t, v, tanIn?, tanOut?}]} sorted by t. tanIn/tanOut are
+ * explicit slopes (dv/dt) for that key's handle; when omitted they're
+ * derived on the fly from neighbouring keys (Catmull-Rom), so old data
+ * without tangents still evaluates (and draws) as a smooth curve. */
 export function makeCurve(keys) {
-  return { keys: keys.map((k) => ({ t: k.t, v: k.v })) };
+  return { keys: keys.map((k) => ({ t: k.t, v: k.v, tanIn: k.tanIn, tanOut: k.tanOut })) };
+}
+
+/** Effective slope at keys[i] for the given side ('in' or 'out'): the
+ * key's own explicit tangent if set, else a Catmull-Rom estimate from
+ * its neighbours (one-sided at the ends). */
+export function tangentAt(keys, i, side) {
+  const k = keys[i];
+  const explicit = side === 'in' ? k.tanIn : k.tanOut;
+  if (explicit !== undefined && explicit !== null) return explicit;
+  const prev = keys[i - 1];
+  const next = keys[i + 1];
+  if (prev && next) {
+    const dt = next.t - prev.t;
+    return dt > 0 ? (next.v - prev.v) / dt : 0;
+  }
+  if (next) {
+    const dt = next.t - k.t;
+    return dt > 0 ? (next.v - k.v) / dt : 0;
+  }
+  if (prev) {
+    const dt = k.t - prev.t;
+    return dt > 0 ? (k.v - prev.v) / dt : 0;
+  }
+  return 0;
 }
 
 export function evalCurve(curve, t) {
@@ -17,8 +44,20 @@ export function evalCurve(curve, t) {
     const a = keys[i];
     const b = keys[i + 1];
     if (t >= a.t && t <= b.t) {
-      const f = b.t > a.t ? (t - a.t) / (b.t - a.t) : 0;
-      return a.v + (b.v - a.v) * f;
+      const dt = b.t - a.t;
+      if (dt <= 0) return a.v;
+      // Cubic Hermite spline: matches value + tangent at both keys, so
+      // per-key handles (or their auto-smoothed default) bend the curve
+      // instead of just lerping in a straight line between keys.
+      const s = (t - a.t) / dt;
+      const s2 = s * s, s3 = s2 * s;
+      const m0 = tangentAt(keys, i, 'out') * dt;
+      const m1 = tangentAt(keys, i + 1, 'in') * dt;
+      const h00 = 2 * s3 - 3 * s2 + 1;
+      const h10 = s3 - 2 * s2 + s;
+      const h01 = -2 * s3 + 3 * s2;
+      const h11 = s3 - s2;
+      return h00 * a.v + h10 * m0 + h01 * b.v + h11 * m1;
     }
   }
   return keys[keys.length - 1].v;
