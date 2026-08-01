@@ -12,6 +12,12 @@ export const LINKS = {
   patreon: 'https://www.patreon.com/YOUR_PAGE',
   github: 'https://github.com/DougAI/particletoy',
 };
+
+/** A link still holding its YOUR_… placeholder is treated as unconfigured, and
+ *  the UI hides it rather than shipping a button that 404s. */
+export function linkReady(url) {
+  return Boolean(url) && !url.includes('YOUR_');
+}
 // ────────────────────────────────────────────────────────────────────────────
 
 // ─── tiny DOM helpers ───────────────────────────────────────────────────────
@@ -414,10 +420,10 @@ function renderFooter() {
   f.innerHTML = `
     <span>particle<b style="color:var(--accent)">toy</b> — build, explore &amp; share particle effects</span>
     <a href="setup.html">self-hosting guide</a>
-    <a href="${esc(LINKS.github)}">source</a>
+    ${linkReady(LINKS.github) ? `<a href="${esc(LINKS.github)}">source</a>` : ''}
     <span style="flex:1"></span>
-    <a href="${esc(LINKS.paypal)}">donate</a>
-    <a href="${esc(LINKS.patreon)}">patreon</a>`;
+    ${linkReady(LINKS.paypal) ? `<a href="${esc(LINKS.paypal)}">donate</a>` : ''}
+    ${linkReady(LINKS.patreon) ? `<a href="${esc(LINKS.patreon)}">patreon</a>` : ''}`;
 }
 
 // ─── page bootstrap ─────────────────────────────────────────────────────────

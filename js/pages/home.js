@@ -1,7 +1,7 @@
 // Front page: particle of the day (live player), featured + latest grids.
 
 import * as api from '../backend.js';
-import { initSite, renderCards, esc, fmtCount, authorName, LINKS } from '../site.js';
+import { initSite, renderCards, esc, fmtCount, authorName, LINKS, linkReady } from '../site.js';
 import { EffectPlayer } from '../player.js';
 
 const $ = (id) => document.getElementById(id);
@@ -59,9 +59,19 @@ async function loadGrid(id, promise, emptyMsg) {
   }
 }
 
-(async function boot() {
+function wireSupportLinks() {
+  const pp = linkReady(LINKS.paypal);
+  const pt = linkReady(LINKS.patreon);
   $('link-paypal').href = LINKS.paypal;
   $('link-patreon').href = LINKS.patreon;
+  $('link-paypal').classList.toggle('hidden', !pp);
+  $('link-patreon').classList.toggle('hidden', !pt);
+  // Nothing to ask for yet — hide the whole box rather than show dead buttons.
+  if (!pp && !pt) document.querySelector('.support-box')?.classList.add('hidden');
+}
+
+(async function boot() {
+  wireSupportLinks();
   await initSite();
   loadPOTD();
   loadGrid('featured-grid', api.getFeatured(8), 'Nothing featured yet.');
