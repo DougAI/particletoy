@@ -123,12 +123,20 @@ python serve.py            # then open http://localhost:8917</code></pre>
     <li>Decide on email confirmation:
       <ul>
         <li><b>Frictionless</b> (recommended to start): turn <b>off</b> “Confirm email”.
-            Sign-ups work instantly.</li>
+            Sign-ups work instantly and no mail is sent.</li>
         <li><b>Verified</b>: leave it on — users must click a link before signing in.
-            Free-tier Supabase email has low rate limits; for real traffic configure
-            <b>custom SMTP</b> (Authentication → Emails → SMTP settings) with e.g.
-            Resend/Postmark.</li>
-      </ul></li>
+            <b>Do not ship this on the built-in SMTP:</b> it allows only a few messages
+            per hour <i>project-wide</i>, so you will hit
+            <code>email rate limit exceeded</code> almost immediately — during your own
+            testing, let alone with real users. Confirmation is only practical with
+            <b>custom SMTP</b> (Authentication → Emails → SMTP settings) via
+            Resend / Postmark / SES.</li>
+      </ul>
+      <p class="muted">Gotcha when switching this off later: accounts created while
+      confirmation was on stay <i>unconfirmed</i> and still can't sign in — the setting
+      only affects new sign-ups. Delete or confirm those rows under
+      <b>Authentication → Users</b>. The same applies to password-reset and email-change
+      mail, which always sends regardless of this toggle.</p></li>
     <li><b>Authentication → URL Configuration</b>:
       <ul>
         <li><b>Site URL</b>: your hosted URL, e.g.
