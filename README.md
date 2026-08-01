@@ -7,7 +7,7 @@ pipelines, and zero-infrastructure sharing.
 Built as a fully static web app: plain ES modules, WebGL2, no dependencies, no build step.
 
 ## Run it
-
+ 
 ```bash
 python serve.py     # → http://localhost:8917
 ```
