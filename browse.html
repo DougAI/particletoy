@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>particletoy — browse</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✨</text></svg>">
+<link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+<header id="site-header"></header>
+
+<main class="wrap">
+  <div class="toolbar">
+    <span class="muted small">Sort:</span>
+    <div class="seg" id="sort-seg">
+      <button data-sort="newest">Newest</button>
+      <button data-sort="popular">Popular</button>
+      <button data-sort="loved">Loved</button>
+      <button data-sort="updated">Updated</button>
+    </div>
+    <span id="active-filters"></span>
+    <span style="flex:1"></span>
+    <span class="muted small" id="result-count"></span>
+  </div>
+
+  <div class="grid" id="grid"><div class="spinner">Loading…</div></div>
+
+  <div class="pager">
+    <button class="btn" id="pg-prev">← Prev</button>
+    <span class="muted small" id="pg-info"></span>
+    <button class="btn" id="pg-next">Next →</button>
+  </div>
+</main>
+
+<footer class="site-footer"><div class="wrap"></div></footer>
+<script type="module" src="js/pages/browse.js"></script>
+</body>
+</html>

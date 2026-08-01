@@ -16,7 +16,7 @@
     margin: 0; background: var(--bg); color: var(--text);
     font: 15px/1.65 -apple-system, "Segoe UI", system-ui, sans-serif;
   }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 40px 24px 90px; }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 40px 24px 90px; }
   h1 { font-size: 30px; margin: 0 0 4px; }
   h1 b { color: var(--accent); }
   .sub { color: var(--dim); margin-bottom: 34px; }
@@ -47,138 +47,153 @@
   }
   .ok { color: #58c07a; font-weight: 600; }
   .muted { color: var(--dim); font-size: 13.5px; }
-  ul { padding-left: 22px; }
+  ul, ol { padding-left: 22px; }
   li { margin: 5px 0; }
-  .pill {
-    display: inline-block; font-size: 12px; border: 1px solid var(--border);
-    border-radius: 99px; padding: 2px 10px; color: var(--dim); margin-right: 6px;
-  }
   .back { position: fixed; top: 14px; right: 18px; }
+  table { border-collapse: collapse; font-size: 13.5px; }
+  td, th { border: 1px solid var(--border); padding: 6px 12px; text-align: left; }
 </style>
 </head>
 <body>
-<a class="back" href="index.html">← back to the editor</a>
+<a class="back" href="index.html">← back to the site</a>
 <div class="wrap">
   <h1>particle<b>toy</b> — setup guide</h1>
-  <div class="sub">What already works, and the (optional) steps to host it and enable the community gallery.</div>
+  <div class="sub">From local dev to a fully hosted community site with accounts,
+  likes, comments and curation.</div>
 
   <div class="card">
-    <p><span class="ok">Works right now, no setup at all:</span></p>
-    <ul>
-      <li>The full editor — emitters, curves, gradients, PBR materials, shader editor</li>
-      <li>Both graphics pipelines (deferred &amp; forward), G-buffer debug views</li>
-      <li><b>Share</b> — the entire effect is compressed into the URL itself, no server involved</li>
-      <li><b>Save / Library</b> — effects stored in your browser (localStorage)</li>
-      <li><b>Export / Import</b> — effects as portable <code>.particletoy.json</code> files</li>
-    </ul>
-    <p class="muted">The only feature that needs infrastructure is the public community gallery
-    (the <b>Publish</b> button) — see step 3.</p>
+    <p><span class="ok">Works with zero setup:</span> the editor, both PBR pipelines,
+    URL sharing, browser library, JSON export/import.</p>
+    <p><span class="ok">Needs ~10 minutes of setup:</span> the community site —
+    accounts, publishing, the gallery, likes, comments, notifications, avatars.
+    It runs on a free <a href="https://supabase.com">Supabase</a> project (steps 3–4).</p>
   </div>
 
   <h2><span class="n">1</span>Run it locally</h2>
-  <p>particletoy is a fully static app (plain ES modules, zero dependencies, no build step),
-  but browsers refuse to run ES modules from <code>file://</code> — so serve the folder over HTTP.
-  A ready-made dev server is included:</p>
+  <p>particletoy is a fully static app (plain ES modules, zero dependencies, no build
+  step), but browsers refuse ES modules from <code>file://</code> — serve the folder:</p>
   <pre><code>cd C:\projects\particletoy
 python serve.py            # then open http://localhost:8917</code></pre>
-  <p>Any static server works instead (<code>npx serve</code>, <code>npx http-server</code>, nginx, …).
-  One caveat on Windows: plain <code>python -m http.server</code> reads MIME types from the registry
-  and often serves <code>.js</code> as <code>text/plain</code>, which breaks ES modules —
-  <code>serve.py</code> exists precisely to pin the correct types.</p>
-  <p class="muted">Browser requirements: WebGL2 + <code>EXT_color_buffer_float</code> (HDR render
-  targets). Every current Chrome / Edge / Firefox / Safari qualifies; the app shows a clear error
-  message if something is missing.</p>
+  <p class="muted">Any static server works, but on Windows avoid plain
+  <code>python -m http.server</code> — it can serve <code>.js</code> as
+  <code>text/plain</code> (registry MIME types), which breaks ES modules.
+  Requirements: WebGL2 + <code>EXT_color_buffer_float</code> (all current browsers).</p>
 
-  <h2><span class="n">2</span>Host it (free static hosting)</h2>
-  <p>Because there's no build step and no backend, hosting is just "upload the folder".
-  Share links keep working on any host since the effect data lives in the URL fragment.</p>
+  <h3>Page map</h3>
+  <table>
+    <tr><td><code>index.html</code></td><td>front page — particle of the day, featured, latest</td></tr>
+    <tr><td><code>browse.html</code></td><td>search / sort / tag browsing</td></tr>
+    <tr><td><code>view.html?id=…</code></td><td>a particle's page — player, likes, comments</td></tr>
+    <tr><td><code>editor.html</code></td><td>the editor (old share links to index.html redirect here)</td></tr>
+    <tr><td><code>account.html</code></td><td>your particles, profile, settings</td></tr>
+    <tr><td><code>user.html?u=…</code></td><td>anyone's public profile</td></tr>
+  </table>
 
-  <h3>Option A — GitHub Pages (recommended)</h3>
-  <p>Create an empty repo at <a href="https://github.com/new">github.com/new</a>, then push:</p>
-  <pre><code>cd C:\projects\particletoy
-git init
-git add -A
-git commit -m "particletoy"
-git remote add origin https://github.com/&lt;you&gt;/particletoy.git
-git push -u origin master</code></pre>
-  <p>Pushing does <b>not</b> publish the site on its own — you have to switch Pages on once,
-  in the browser: <b>repo → Settings → Pages</b>, set <b>Source</b> to “Deploy from a branch”,
-  <b>Branch</b> to the one you pushed (<code>master</code> or <code>main</code>) with folder
-  <code>/ (root)</code>, then <b>Save</b>.</p>
-  <p>Your app appears at <code>https://&lt;you&gt;.github.io/particletoy/</code> a minute or two later.
-  The <code>.nojekyll</code> file in the repo root tells Pages to serve the files exactly as they
-  are rather than running them through Jekyll.</p>
-  <p class="muted">If you have the <a href="https://cli.github.com/">GitHub CLI</a> installed,
-  <code>gh repo create particletoy --public --source . --push</code> replaces the repo-creation step
-  and both <code>remote</code>/<code>push</code> lines. You still enable Pages in Settings.</p>
+  <h2><span class="n">2</span>Host the static site (GitHub Pages)</h2>
+  <p>Everything is static, so hosting is "upload the folder". With the repo already on
+  GitHub: <b>repo → Settings → Pages</b> → Source “Deploy from a branch” →
+  branch <code>master</code>, folder <code>/ (root)</code> → Save. The site appears at
+  <code>https://&lt;you&gt;.github.io/particletoy/</code>. Netlify / Cloudflare Pages
+  work identically (build command: none, publish dir: <code>/</code>).</p>
 
-  <h3>Option B — Netlify / Cloudflare Pages / Vercel</h3>
-  <ul>
-    <li>Drag-and-drop the folder onto <a href="https://app.netlify.com/drop">netlify.com/drop</a>, or</li>
-    <li>Connect the repo in the dashboard; set <b>build command: none</b>, <b>publish directory: /</b>.</li>
+  <h2 id="backend"><span class="n">3</span>Create the backend (Supabase)</h2>
+  <p>The community features use Supabase — Postgres + auth + file storage behind a REST
+  API, called directly from the browser with no SDK. The free tier is plenty.</p>
+  <ol>
+    <li>Create a project at <a href="https://supabase.com/dashboard">supabase.com/dashboard</a>
+        (any name/region; note the database password somewhere safe).</li>
+    <li><b>Dashboard → SQL Editor → New query</b>: paste the entire contents of
+        <code>supabase/schema.sql</code> from this repo and <b>Run</b>.
+        It creates every table, security policy, trigger and the storage bucket.
+        Re-running it later is safe.</li>
+    <li><b>Project Settings → API</b>: copy the <b>Project URL</b> and the
+        <b>anon / publishable</b> key into the two constants at the top of
+        <code>js/backend.js</code>.
+        <span class="muted">(Already done if the constants are filled in.)</span></li>
+  </ol>
+  <p class="muted">The publishable key is designed to be public — row-level security
+  policies in the schema are what limit what visitors can do. Private particles are
+  enforced by the database, not the client.</p>
+
+  <h2><span class="n">4</span>Configure authentication</h2>
+  <p>In the Supabase dashboard:</p>
+  <ol>
+    <li><b>Authentication → Sign In / Providers → Email</b>: make sure Email is enabled
+        (it is by default).</li>
+    <li>Decide on email confirmation:
+      <ul>
+        <li><b>Frictionless</b> (recommended to start): turn <b>off</b> “Confirm email”.
+            Sign-ups work instantly.</li>
+        <li><b>Verified</b>: leave it on — users must click a link before signing in.
+            Free-tier Supabase email has low rate limits; for real traffic configure
+            <b>custom SMTP</b> (Authentication → Emails → SMTP settings) with e.g.
+            Resend/Postmark.</li>
+      </ul></li>
+    <li><b>Authentication → URL Configuration</b>:
+      <ul>
+        <li><b>Site URL</b>: your hosted URL, e.g.
+            <code>https://&lt;you&gt;.github.io/particletoy/</code></li>
+        <li><b>Redirect URLs</b>: add <code>http://localhost:8917/*</code> (dev) and
+            <code>https://&lt;you&gt;.github.io/particletoy/*</code></li>
+      </ul>
+      Password-reset and email-change links land on <code>account.html</code>, which
+      handles them automatically.</li>
+  </ol>
+
+  <h2><span class="n">5</span>Make yourself admin &amp; curate the front page</h2>
+  <p>Sign up through the site first, then in the SQL editor:</p>
+  <pre><code>update public.profiles set is_admin = true where username = 'your_username';</code></pre>
+  <p>Admins see two extra buttons on every particle page — <b>★ Feature</b> (adds it to
+  the front-page featured grid) and <b>☀ POTD</b> (makes it the particle of the day).
+  Until anything is curated, the front page falls back to the most-loved particles
+  automatically, so the site never looks empty.</p>
+
+  <h2><span class="n">6</span>Donate buttons</h2>
+  <p>The front page shows PayPal and Patreon buttons. Point them at your real pages in
+  <code>js/site.js</code>:</p>
+  <pre><code>export const LINKS = {
+  paypal:  'https://www.paypal.com/donate/?hosted_button_id=XXXXXXXX',
+  patreon: 'https://www.patreon.com/yourpage',
+  github:  'https://github.com/you/particletoy',
+};</code></pre>
+  <p class="muted">PayPal: paypal.com → Pay &amp; Get Paid → Donate button → create,
+  copy the hosted button id. Patreon: your creator page URL.</p>
+
+  <h2><span class="n">7</span>How the pieces fit</h2>
+  <pre><code>Browser (static pages on GitHub Pages)
+  │  fetch() — plain REST, no SDK
+  ▼
+Supabase
+  ├─ Auth (GoTrue)     sign-up/in, password reset, email change → JWT
+  ├─ PostgREST         /rest/v1/* — tables below, guarded by RLS + the JWT
+  │    profiles        username, display name, avatar, bio, notify prefs
+  │    particles       title, description, tags[], data (jsonb), visibility,
+  │                    views/likes/comment_count (trigger-maintained)
+  │    likes, comments counters + in-app notifications via triggers
+  │    featured        POTD + featured grid (admin-only writes)
+  └─ Storage           /media/&lt;uid&gt;/avatar.jpg, /media/&lt;uid&gt;/thumbs/&lt;id&gt;.jpg</code></pre>
+  <ul class="muted">
+    <li>Clients can never write counters or <code>is_admin</code> — column-level grants.</li>
+    <li>Private particles are filtered by RLS in every query, including embeds.</li>
+    <li>View counts go through a <code>bump_views()</code> RPC; likes/comments maintain
+        counters via triggers.</li>
+    <li>Card hover-previews and the POTD render the <i>actual effect</i> live in WebGL —
+        thumbnails are only the static fallback, captured on publish.</li>
   </ul>
-  <p class="muted">You can delete <code>serve.py</code> and <code>_shots/</code> before deploying —
-  they are development helpers only.</p>
 
-  <h2 id="gallery"><span class="n">3</span>Enable the community gallery (optional)</h2>
-  <p>The <b>Publish</b> / gallery feature needs a tiny database. The app ships with a complete
-  <a href="https://supabase.com">Supabase</a> integration (plain REST, no SDK) that is dormant until
-  you fill in two constants. Total setup ≈ 5 minutes on the free tier.</p>
-
-  <h3>3.1 Create the project &amp; table</h3>
+  <h2><span class="n">8</span>Costs, limits, growth</h2>
   <ul>
-    <li>Create a free project at <a href="https://supabase.com/dashboard">supabase.com/dashboard</a></li>
-    <li>Open <b>SQL Editor</b> and run:</li>
+    <li><b>Free tier</b>: 500 MB database + 1 GB storage + 50k monthly active users —
+        plenty for a hobby community. Effects are ~2–30 KB each.</li>
+    <li>If it takes off: Supabase Pro ($25/mo) removes the project-pausing-after-a-week
+        of-inactivity behavior and raises limits.</li>
+    <li>Abuse controls worth adding later: Supabase Auth captcha (hCaptcha/Turnstile
+        toggle in Auth settings), a <code>reported</code> flag on particles, and rate
+        limiting via Supabase's built-ins.</li>
   </ul>
-  <pre><code>create table public.effects (
-  id         uuid primary key default gen_random_uuid(),
-  created_at timestamptz not null default now(),
-  name       text not null check (char_length(name) between 1 and 80),
-  author     text not null check (char_length(author) between 1 and 40),
-  data       jsonb not null check (pg_column_size(data) &lt; 200000)
-);
 
-alter table public.effects enable row level security;
-
--- anyone may read and publish; nobody may edit or delete via the anon key
-create policy "public read"    on public.effects for select using (true);
-create policy "public publish" on public.effects for insert with check (true);</code></pre>
-
-  <h3>3.2 Paste your keys</h3>
-  <p>In <b>Project Settings → API</b>, copy the <b>Project URL</b> and the <b>anon public</b> key,
-  then open <code>js/backend.js</code> and fill in the two constants at the top:</p>
-  <pre><code>const SUPABASE_URL = 'https://YOURPROJECT.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOi…';</code></pre>
-  <p>That's it — the <b>Publish</b> button now uploads to your gallery, the publish dialog lists
-  recent community effects, and <code>?id=&lt;uuid&gt;</code> URLs load published effects directly.</p>
-  <p class="muted">The anon key is designed to be public — the RLS policies above are what limit it
-  to read + insert. For real public deployments consider adding Supabase's rate limiting, a
-  moderation flag column, or captcha at the edge.</p>
-
-  <h2><span class="n">4</span>Where things live</h2>
-  <pre><code>index.html        app shell
-setup.html        this guide
-serve.py          dev server (correct MIME types + screenshot helper)
-css/style.css     theme
-js/
-  main.js         bootstrap, frame loop, toolbar
-  renderer.js     deferred + forward PBR pipelines, bloom, tonemap
-  shaderlib.js    GLSL library + user-shader wrappers (the material API)
-  particles.js    emitters: spawn/burst/loop, curves, instancing
-  materials.js    material model + per-variant compilation
-  presets.js      built-in example effects
-  ui.js           inspector, shader editor panel, modals
-  editor.js       GLSL code editor (highlighting, errors)
-  widgets.js      curve + gradient canvas editors
-  curves.js       curve/gradient models, LUT baking
-  geometry.js     quad/cube/sphere meshes + OBJ parser
-  camera.js       orbit camera
-  share.js        URL sharing, JSON export, localStorage library
-  backend.js      community gallery (Supabase REST) — configure in step 3
-  glutil.js / math3d.js   WebGL2 + math helpers</code></pre>
-
-  <p class="muted" style="margin-top:40px">Have fun. The <b>?</b> button in the editor documents the
-  full shader API (PBR Surface struct, particle inputs, noise library).</p>
+  <p class="muted" style="margin-top:40px">Have fun. The <b>?</b> button in the editor
+  documents the full shader API (PBR Surface struct, particle inputs, noise library).</p>
 </div>
 </body>
 </html>

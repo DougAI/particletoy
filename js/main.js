@@ -11,7 +11,8 @@ import {
   serializeState, encodeShareString, decodeShareString,
   loadLibrary, saveToLibrary, deleteFromLibrary, downloadJSON, pickJSONFile,
 } from './share.js';
-import { backendConfigured, publishEffect, browseEffects, loadEffect } from './backend.js';
+import * as api from './backend.js';
+import { captureCanvasJPEG } from './player.js';
 
 const canvas = document.getElementById('gl');
 const { gl, error: glError } = createGL(canvas);
@@ -88,6 +89,22 @@ const app = {
   },
 };
 window.__particletoy = { app, renderer, gl, canvas }; // for curious consoles
+
+// Cloud state: set when the effect was loaded from (or published to) the
+// community gallery, so Publish knows whether to update-in-place or create.
+const cloud = { id: null, owner: null, description: '', tags: [], visibility: 'public' };
+
+function isCloudOwner() {
+  const u = api.currentUser();
+  return Boolean(cloud.id && u && cloud.owner === u.id);
+}
+
+function updatePublishButton() {
+  const b = document.getElementById('btn-publish');
+  b.textContent = isCloudOwner() ? 'Save ↑' : 'Publish';
+  b.title = isCloudOwner()
+    ? 'Save changes to your published particle' : 'Publish to the community gallery';
+}
 
 const editorPanel = new EditorPanel(app);
 
@@ -300,63 +317,137 @@ function showLibrary() {
   modal('Browser Library', div);
 }
 
+// Minimal in-editor sign-in/sign-up (the site pages have the full dialog;
+// this one reuses the editor's own modal styling).
+function editorSignIn() {
+  return new Promise((resolve) => {
+    let mode = 'signin';
+    const div = document.createElement('div');
+    const render = () => {
+      div.innerHTML = `
+        <div class="prop-row"><label class="prop-label">Email</label>
+          <input id="au-email" class="text-in" type="email" autocomplete="email"></div>
+        <div class="prop-row"><label class="prop-label">Password</label>
+          <input id="au-pass" class="text-in" type="password"
+                 autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}"></div>
+        ${mode === 'signup' ? `
+        <div class="prop-row"><label class="prop-label">Username</label>
+          <input id="au-user" class="text-in" maxlength="20" placeholder="a-z, 0-9, _"></div>` : ''}
+        <p id="au-err" class="muted" style="color:var(--danger);min-height:16px"></p>
+        <button id="au-go" class="btn btn-accent">${mode === 'signup' ? 'Create account' : 'Sign in'}</button>
+        <p class="muted" style="margin-top:8px">
+          ${mode === 'signup' ? 'Already have an account?' : 'No account yet?'}
+          <a href="#" id="au-toggle">${mode === 'signup' ? 'Sign in' : 'Create one'}</a></p>`;
+      div.querySelector('#au-toggle').addEventListener('click', (e) => {
+        e.preventDefault();
+        mode = mode === 'signup' ? 'signin' : 'signup';
+        render();
+      });
+      div.querySelector('#au-go').addEventListener('click', async () => {
+        const err = div.querySelector('#au-err');
+        try {
+          const email = div.querySelector('#au-email').value.trim();
+          const password = div.querySelector('#au-pass').value;
+          if (mode === 'signup') {
+            const username = div.querySelector('#au-user').value.trim().toLowerCase();
+            if (!/^[a-z0-9_]{3,20}$/.test(username)) throw new Error('Username: 3–20 chars, a-z 0-9 _');
+            if (!(await api.usernameAvailable(username))) throw new Error('That username is taken');
+            const r = await api.signUp({ email, password, username });
+            if (!r.confirmed) {
+              div.innerHTML = '<p>Check your email for a confirmation link, then sign in again.</p>';
+              return;
+            }
+          } else {
+            await api.signIn({ email, password });
+          }
+          document.getElementById('modal-root').innerHTML = '';
+          resolve(true);
+        } catch (ex) { err.textContent = ex.message; }
+      });
+    };
+    render();
+    modal('Sign in to publish', div);
+  });
+}
+
 async function showPublish() {
-  if (!backendConfigured()) {
+  if (!api.backendConfigured()) {
     modal('Publish — backend not configured', `
-      <p>Publishing to a public community gallery needs a tiny backend
-      (everything else — editing, URL sharing, export — is 100% serverless).</p>
-      <p>A complete Supabase implementation is already wired up in
-      <code>js/backend.js</code>; you only need to create a free project and
-      paste two values.</p>
-      <p><a href="setup.html#gallery" target="_blank">Open the setup guide ↗</a></p>
+      <p>Publishing needs the community backend — see the setup guide.</p>
+      <p><a href="setup.html#backend" target="_blank">Open the setup guide ↗</a></p>
       <p class="muted">Until then, <b>Share</b> links carry the entire effect in the URL.</p>`);
     return;
   }
+  if (!api.currentUser() && !(await editorSignIn())) return;
+
+  const owner = isCloudOwner();
   const div = document.createElement('div');
   div.innerHTML = `
-    <div class="prop-row"><label class="prop-label">Author</label>
-      <input id="pub-author" class="text-in" placeholder="anonymous"></div>
-    <div id="pub-list" class="muted" style="margin-top:10px">Loading gallery…</div>`;
-  const { body } = modal('Community Gallery', div, { wide: true });
-  const publishBtn = document.createElement('button');
-  publishBtn.className = 'btn btn-accent';
-  publishBtn.textContent = `Publish “${app.name}”`;
-  publishBtn.addEventListener('click', async () => {
+    <div class="prop-row"><label class="prop-label">Title</label>
+      <input id="pub-title" class="text-in" maxlength="80"></div>
+    <div class="prop-row"><label class="prop-label">Description</label></div>
+    <textarea id="pub-desc" class="text-in" rows="4" maxlength="2000"
+      style="width:100%;resize:vertical" placeholder="What is it? Any controls? Techniques worth noting?"></textarea>
+    <div class="prop-row"><label class="prop-label">Tags</label>
+      <input id="pub-tags" class="text-in" placeholder="fire, magic, fountain (comma-separated)"></div>
+    <div class="prop-row"><label class="prop-label">Visibility</label>
+      <select id="pub-vis" class="select-in">
+        <option value="public">Public — in the gallery</option>
+        <option value="private">Private — only you</option>
+      </select></div>
+    ${owner ? `<label class="prop-row" style="gap:6px;cursor:pointer">
+      <input type="checkbox" id="pub-copy"> <span>Publish as a new copy instead of updating</span></label>` : ''}
+    <p id="pub-err" class="muted" style="color:var(--danger);min-height:16px"></p>
+    <button id="pub-go" class="btn btn-accent">${owner ? 'Save changes' : 'Publish'}</button>
+    <span class="muted"> A thumbnail is captured from the current view.</span>
+    <div id="pub-done" style="margin-top:10px"></div>`;
+  modal(owner ? 'Save to gallery' : 'Publish to gallery', div, { wide: true });
+
+  div.querySelector('#pub-title').value = app.name || 'Untitled';
+  div.querySelector('#pub-desc').value = cloud.description || '';
+  div.querySelector('#pub-tags').value = (cloud.tags || []).join(', ');
+  div.querySelector('#pub-vis').value = cloud.visibility || 'public';
+
+  div.querySelector('#pub-go').addEventListener('click', async () => {
+    const err = div.querySelector('#pub-err');
+    const go = div.querySelector('#pub-go');
+    go.disabled = true;
+    err.textContent = '';
     try {
-      const author = body.querySelector('#pub-author').value || 'anonymous';
-      const { id } = await publishEffect(app.name, author, currentData());
-      toast('Published!');
-      const url = `${location.origin}${location.pathname}?id=${id}`;
-      body.querySelector('#pub-list').innerHTML =
-        `<p>Published — direct link:</p><input class="text-in share-url" readonly value="${url}">`;
-    } catch (e) {
-      toast(`Publish failed: ${e.message}`);
+      const title = div.querySelector('#pub-title').value.trim() || 'Untitled';
+      const description = div.querySelector('#pub-desc').value.trim();
+      const visibility = div.querySelector('#pub-vis').value;
+      const tags = div.querySelector('#pub-tags').value
+        .split(',').map((t) => t.trim().toLowerCase().replace(/[^a-z0-9\-_ ]/g, '').replace(/\s+/g, '-'))
+        .filter(Boolean).slice(0, 12);
+      const asCopy = div.querySelector('#pub-copy')?.checked;
+      const payload = { title, description, tags, visibility, data: currentData() };
+
+      let id = cloud.id;
+      if (isCloudOwner() && !asCopy) {
+        await api.updateParticle(id, payload);
+      } else {
+        ({ id } = await api.createParticle(payload));
+      }
+      const thumb = await captureCanvasJPEG(canvas, () => frame(performance.now()));
+      if (thumb) await api.uploadThumb(id, thumb).catch(() => {});
+
+      app.name = title;
+      document.getElementById('fx-name').value = title;
+      Object.assign(cloud, { id, owner: api.currentUser().id, description, tags, visibility });
+      updatePublishButton();
+
+      const url = new URL(`view.html?id=${id}`, location.href).href;
+      div.querySelector('#pub-done').innerHTML =
+        `<p>✔ ${owner && !asCopy ? 'Saved' : 'Published'} — <a href="${url}">open its page ↗</a></p>
+         <input class="text-in share-url" readonly value="${url}">`;
+      toast(owner && !asCopy ? 'Saved to gallery' : 'Published!');
+    } catch (ex) {
+      err.textContent = ex.message;
+    } finally {
+      go.disabled = false;
     }
   });
-  div.prepend(publishBtn);
-  try {
-    const rows = await browseEffects();
-    const listEl = body.querySelector('#pub-list');
-    listEl.classList.remove('muted');
-    listEl.innerHTML = '';
-    for (const r of rows) {
-      const rowEl = document.createElement('div');
-      rowEl.className = 'lib-row';
-      rowEl.innerHTML = `<span class="lib-name">${r.name} <span class="muted">by ${r.author}</span></span>`;
-      const load = document.createElement('button');
-      load.className = 'btn btn-small';
-      load.textContent = 'Load';
-      load.addEventListener('click', async () => {
-        const row = await loadEffect(r.id);
-        if (row) {
-          applyData(row.data);
-          document.getElementById('modal-root').innerHTML = '';
-        }
-      });
-      rowEl.appendChild(load);
-      listEl.appendChild(rowEl);
-    }
-  } catch { /* gallery list is best-effort */ }
 }
 
 // ---------------------------------------------------------------- splitter
@@ -448,6 +539,7 @@ window.__particletoy.camera = camera;
 async function boot() {
   wireToolbar();
   wireSplitter();
+  await api.initBackend().catch(() => {});
 
   let loaded = false;
   const hash = location.hash;
@@ -461,17 +553,33 @@ async function boot() {
     }
   }
   const id = new URLSearchParams(location.search).get('id');
-  if (!loaded && id && backendConfigured()) {
+  if (!loaded && id && api.backendConfigured()) {
     try {
-      const row = await loadEffect(id);
+      const row = await api.getParticle(id);
       if (row) {
         applyData(row.data);
+        app.name = row.title || app.name;
+        document.getElementById('fx-name').value = app.name;
+        if (!row.legacy) {
+          Object.assign(cloud, {
+            id: row.id,
+            owner: row.owner,
+            description: row.description || '',
+            tags: row.tags || [],
+            visibility: row.visibility || 'public',
+          });
+        }
         loaded = true;
+        toast(isCloudOwner()
+          ? 'Editing your published particle — Save ↑ updates it'
+          : `Loaded “${row.title}” — Publish saves your own remix`);
       }
     } catch { /* fall through to default preset */ }
   }
   if (!loaded) applyData(PRESETS['Campfire']());
 
+  updatePublishButton();
+  window.addEventListener('pt:auth', updatePublishButton);
   requestAnimationFrame((t) => { last = t; tick(t); });
 }
 

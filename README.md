@@ -59,8 +59,24 @@ tonemapping.
 - **Save / Library** — browser localStorage
 - **Export / Import** — portable `.particletoy.json` files
 - **Presets** — Campfire, Magic Orb, Fountain, Confetti Burst, Smoke Plume, blank starter
-- **Publish** — optional community gallery backed by Supabase; dormant until configured
-  (see [setup.html](setup.html), ~5 minutes)
+
+**The community site** (accounts + gallery, backed by a free Supabase project):
+
+- Front page ([index.html](index.html)) — **particle of the day** rendered live front and
+  center, featured + latest grids with **live hover previews**, search, donate links
+- **Accounts** — email/password sign-up, password reset, email change, avatars,
+  display names, bios, notification preferences, in-app notifications
+- **Project pages** ([view.html](view.html)) — live player, description, tags, author,
+  created/edited dates, view counter, **likes** and a **comment section**;
+  owners can flip particles **public/private**, edit, or delete
+- **Browse** ([browse.html](browse.html)) — full-text search, tag filters,
+  newest/popular/loved sorting, pagination
+- **Publish from the editor** — captures a thumbnail and saves to your account;
+  re-publishing your own particle updates it in place
+- Admin curation (★ feature / ☀ particle of the day) straight from particle pages
+
+Setup for all of it is one SQL file + a few dashboard toggles — see
+[setup.html](setup.html) / [supabase/schema.sql](supabase/schema.sql).
 
 ## Controls
 
@@ -69,14 +85,20 @@ tonemapping.
 - Curve editors: drag keys, double-click to add, right-click to remove.
   Gradient editor: double-click a stop to recolor, double-click empty space to add.
 
-## Hosting & the community gallery
+## Hosting & the community backend
 
-See **[setup.html](setup.html)** — it walks through local serving, free static hosting
-(GitHub Pages / Netlify / Cloudflare), and enabling the publish/gallery backend
-(SQL + RLS policies included; you only paste two constants into `js/backend.js`).
+See **[setup.html](setup.html)** — local serving, free static hosting (GitHub Pages /
+Netlify / Cloudflare), and standing up the community backend on Supabase:
+run [supabase/schema.sql](supabase/schema.sql) once in the SQL editor, set the Site URL
+in Auth settings, done. Row-level security enforces public/private server-side; clients
+can't touch counters or admin flags.
 
 ## Code map
 
-See the "Where things live" section of [setup.html](setup.html). Headline modules:
-`js/renderer.js` (both pipelines), `js/shaderlib.js` (GLSL + the material API wrappers),
-`js/particles.js` (simulation), `js/ui.js` (inspector + editor panel).
+Site: `index.html` / `browse.html` / `view.html` / `account.html` / `user.html` +
+`js/pages/*` and shared chrome in `js/site.js`; `js/backend.js` is the whole REST client
+(auth, particles, likes, comments, notifications, storage); `js/player.js` is the
+embeddable renderer used for the front page, hover previews, and view pages.
+Editor: `editor.html` + `js/main.js`, with `js/renderer.js` (both pipelines),
+`js/shaderlib.js` (GLSL + material API wrappers), `js/particles.js` (simulation),
+`js/ui.js` (inspector + editor panel).

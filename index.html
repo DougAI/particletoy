@@ -4,66 +4,71 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>particletoy — build, explore &amp; share particle effects</title>
+<meta name="description" content="A shadertoy-style playground for realtime particle effects: programmable PBR materials, WebGL2, and a community gallery.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✨</text></svg>">
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/site.css">
+<script>
+  // Legacy links: the editor used to live at this URL. Old share links
+  // (#s=…) and gallery links (?id=…) still open the effect — in the editor.
+  (function () {
+    var qid = new URLSearchParams(location.search).get('id');
+    if (location.hash.indexOf('#s=') === 0 || qid) {
+      location.replace('editor.html' + location.search + location.hash);
+    }
+  })();
+</script>
 </head>
 <body>
-<header id="topbar">
-  <div class="brand">particle<b>toy</b></div>
-  <input id="fx-name" class="text-in fx-name" value="Untitled" title="Effect name">
-  <select id="preset-select" class="select-in" title="Load a preset"></select>
-  <div class="seg" id="pipeline-seg" title="Graphics pipeline">
-    <button id="pipe-deferred" class="seg-btn active" type="button">PBR · Deferred</button>
-    <button id="pipe-forward" class="seg-btn" type="button">PBR · Forward</button>
-  </div>
-  <select id="debug-select" class="select-in" title="G-buffer debug view (deferred)">
-    <option value="0">View: Final</option>
-    <option value="1">View: Albedo</option>
-    <option value="2">View: Normals</option>
-    <option value="3">View: Rough/Metal</option>
-    <option value="4">View: Emissive</option>
-    <option value="5">View: Depth</option>
-  </select>
-  <div class="flex-spacer"></div>
-  <button id="btn-play" class="btn" type="button" title="Play/Pause (Space)">⏸</button>
-  <button id="btn-restart" class="btn" type="button" title="Restart">⟲</button>
-  <select id="speed-select" class="select-in" title="Time scale">
-    <option value="0.25">0.25×</option>
-    <option value="0.5">0.5×</option>
-    <option value="1" selected>1×</option>
-    <option value="2">2×</option>
-  </select>
-  <span class="topbar-sep"></span>
-  <button id="btn-share" class="btn btn-accent" type="button" title="Copy a shareable link">Share</button>
-  <button id="btn-save" class="btn" type="button" title="Save to browser library">Save</button>
-  <button id="btn-library" class="btn" type="button" title="Open browser library">Library</button>
-  <button id="btn-export" class="btn" type="button" title="Download effect JSON">Export</button>
-  <button id="btn-import" class="btn" type="button" title="Import effect JSON">Import</button>
-  <button id="btn-publish" class="btn" type="button" title="Publish to community gallery">Publish</button>
-  <button id="btn-help" class="btn btn-icon" type="button" title="Shader API help">?</button>
-</header>
+<header id="site-header"></header>
 
-<div id="main">
-  <div id="left">
-    <div id="viewport">
-      <canvas id="gl"></canvas>
-      <div id="viewport-overlay">
-        <span id="stats"></span>
-        <button id="btn-cam-reset" class="btn btn-small" type="button" title="Reset camera">⌂ cam</button>
+<main class="wrap">
+  <section class="hero">
+    <div class="hero-grid">
+      <div>
+        <div class="potd-frame" id="potd-frame">
+          <div class="ph" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:44px">✨</div>
+        </div>
+        <div class="potd-caption" id="potd-caption"></div>
       </div>
-      <div id="gl-error" class="hidden"></div>
+      <div class="hero-copy">
+        <h1>Build <em>and</em> share<br>realtime <span>particle&nbsp;effects</span></h1>
+        <p>A shadertoy-style playground for game-engine-grade particles:
+        programmable PBR materials, deferred &amp; forward pipelines, curves,
+        bursts and bloom — all live in your browser, nothing to install.</p>
+        <div class="hero-actions">
+          <a class="btn accent" href="editor.html">✨ Start creating</a>
+          <a class="btn" href="browse.html">Browse the gallery</a>
+        </div>
+        <div class="support-box">
+          <h3>Enjoying particletoy?</h3>
+          <p class="muted">It's free and open — donations keep the servers sparkling.</p>
+          <div class="support-row">
+            <a class="btn small paypal" id="link-paypal" target="_blank" rel="noopener">PayPal — Donate</a>
+            <a class="btn small patreon" id="link-patreon" target="_blank" rel="noopener">♥ Become a patron</a>
+          </div>
+        </div>
+      </div>
     </div>
-    <div id="inspector"></div>
-  </div>
-  <div id="splitter"></div>
-  <div id="right">
-    <div id="editor-toolbar"></div>
-    <div id="editor-host"></div>
-    <div id="editor-errors"></div>
-  </div>
-</div>
+  </section>
 
-<div id="modal-root"></div>
-<script type="module" src="js/main.js"></script>
+  <section>
+    <div class="section-head">
+      <h2>Featured</h2>
+      <a href="browse.html?sort=loved">most loved →</a>
+    </div>
+    <div class="grid" id="featured-grid"><div class="spinner">Loading…</div></div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Latest</h2>
+      <a href="browse.html?sort=newest">see all →</a>
+    </div>
+    <div class="grid" id="latest-grid"><div class="spinner">Loading…</div></div>
+  </section>
+</main>
+
+<footer class="site-footer"><div class="wrap"></div></footer>
+<script type="module" src="js/pages/home.js"></script>
 </body>
 </html>
