@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>particletoy — setup guide</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✨</text></svg>">
+<style>
+  :root {
+    --bg: #0d0e11; --panel: #14161b; --border: #262a33;
+    --text: #d7dae0; --dim: #8b909c; --accent: #e8a33d; --blue: #4d9fff;
+    --mono: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.65 -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 40px 24px 90px; }
+  h1 { font-size: 30px; margin: 0 0 4px; }
+  h1 b { color: var(--accent); }
+  .sub { color: var(--dim); margin-bottom: 34px; }
+  h2 {
+    font-size: 20px; margin: 44px 0 10px; padding-top: 22px;
+    border-top: 1px solid var(--border); color: var(--accent);
+  }
+  h2 .n {
+    display: inline-block; width: 28px; height: 28px; line-height: 28px;
+    text-align: center; border-radius: 50%; background: var(--accent);
+    color: #1c1405; font-size: 15px; font-weight: 700; margin-right: 10px;
+  }
+  h3 { font-size: 15px; margin: 22px 0 6px; }
+  a { color: var(--blue); }
+  code {
+    font-family: var(--mono); font-size: 13px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px;
+  }
+  pre {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px;
+    line-height: 1.55;
+  }
+  pre code { background: none; border: none; padding: 0; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 18px; margin: 14px 0;
+  }
+  .ok { color: #58c07a; font-weight: 600; }
+  .muted { color: var(--dim); font-size: 13.5px; }
+  ul { padding-left: 22px; }
+  li { margin: 5px 0; }
+  .pill {
+    display: inline-block; font-size: 12px; border: 1px solid var(--border);
+    border-radius: 99px; padding: 2px 10px; color: var(--dim); margin-right: 6px;
+  }
+  .back { position: fixed; top: 14px; right: 18px; }
+</style>
+</head>
+<body>
+<a class="back" href="index.html">← back to the editor</a>
+<div class="wrap">
+  <h1>particle<b>toy</b> — setup guide</h1>
+  <div class="sub">What already works, and the (optional) steps to host it and enable the community gallery.</div>
+
+  <div class="card">
+    <p><span class="ok">Works right now, no setup at all:</span></p>
+    <ul>
+      <li>The full editor — emitters, curves, gradients, PBR materials, shader editor</li>
+      <li>Both graphics pipelines (deferred &amp; forward), G-buffer debug views</li>
+      <li><b>Share</b> — the entire effect is compressed into the URL itself, no server involved</li>
+      <li><b>Save / Library</b> — effects stored in your browser (localStorage)</li>
+      <li><b>Export / Import</b> — effects as portable <code>.particletoy.json</code> files</li>
+    </ul>
+    <p class="muted">The only feature that needs infrastructure is the public community gallery
+    (the <b>Publish</b> button) — see step 3.</p>
+  </div>
+
+  <h2><span class="n">1</span>Run it locally</h2>
+  <p>particletoy is a fully static app (plain ES modules, zero dependencies, no build step),
+  but browsers refuse to run ES modules from <code>file://</code> — so serve the folder over HTTP.
+  A ready-made dev server is included:</p>
+  <pre><code>cd C:\projects\particletoy
+python serve.py            # then open http://localhost:8917</code></pre>
+  <p>Any static server works instead (<code>npx serve</code>, <code>npx http-server</code>, nginx, …).
+  One caveat on Windows: plain <code>python -m http.server</code> reads MIME types from the registry
+  and often serves <code>.js</code> as <code>text/plain</code>, which breaks ES modules —
+  <code>serve.py</code> exists precisely to pin the correct types.</p>
+  <p class="muted">Browser requirements: WebGL2 + <code>EXT_color_buffer_float</code> (HDR render
+  targets). Every current Chrome / Edge / Firefox / Safari qualifies; the app shows a clear error
+  message if something is missing.</p>
+
+  <h2><span class="n">2</span>Host it (free static hosting)</h2>
+  <p>Because there's no build step and no backend, hosting is just "upload the folder".
+  Share links keep working on any host since the effect data lives in the URL fragment.</p>
+
+  <h3>Option A — GitHub Pages (recommended)</h3>
+  <pre><code>cd C:\projects\particletoy
+git init
+git add -A
+git commit -m "particletoy"
+gh repo create particletoy --public --source . --push
+gh api -X POST repos/{owner}/particletoy/pages -f build_type=workflow 2&gt;$null
+# or simply: repo Settings → Pages → Deploy from branch → main / (root)</code></pre>
+  <p>Your app appears at <code>https://&lt;you&gt;.github.io/particletoy/</code> in a minute or two.</p>
+
+  <h3>Option B — Netlify / Cloudflare Pages / Vercel</h3>
+  <ul>
+    <li>Drag-and-drop the folder onto <a href="https://app.netlify.com/drop">netlify.com/drop</a>, or</li>
+    <li>Connect the repo in the dashboard; set <b>build command: none</b>, <b>publish directory: /</b>.</li>
+  </ul>
+  <p class="muted">You can delete <code>serve.py</code> and <code>_shots/</code> before deploying —
+  they are development helpers only.</p>
+
+  <h2 id="gallery"><span class="n">3</span>Enable the community gallery (optional)</h2>
+  <p>The <b>Publish</b> / gallery feature needs a tiny database. The app ships with a complete
+  <a href="https://supabase.com">Supabase</a> integration (plain REST, no SDK) that is dormant until
+  you fill in two constants. Total setup ≈ 5 minutes on the free tier.</p>
+
+  <h3>3.1 Create the project &amp; table</h3>
+  <ul>
+    <li>Create a free project at <a href="https://supabase.com/dashboard">supabase.com/dashboard</a></li>
+    <li>Open <b>SQL Editor</b> and run:</li>
+  </ul>
+  <pre><code>create table public.effects (
+  id         uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  name       text not null check (char_length(name) between 1 and 80),
+  author     text not null check (char_length(author) between 1 and 40),
+  data       jsonb not null check (pg_column_size(data) &lt; 200000)
+);
+
+alter table public.effects enable row level security;
+
+-- anyone may read and publish; nobody may edit or delete via the anon key
+create policy "public read"    on public.effects for select using (true);
+create policy "public publish" on public.effects for insert with check (true);</code></pre>
+
+  <h3>3.2 Paste your keys</h3>
+  <p>In <b>Project Settings → API</b>, copy the <b>Project URL</b> and the <b>anon public</b> key,
+  then open <code>js/backend.js</code> and fill in the two constants at the top:</p>
+  <pre><code>const SUPABASE_URL = 'https://YOURPROJECT.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOi…';</code></pre>
+  <p>That's it — the <b>Publish</b> button now uploads to your gallery, the publish dialog lists
+  recent community effects, and <code>?id=&lt;uuid&gt;</code> URLs load published effects directly.</p>
+  <p class="muted">The anon key is designed to be public — the RLS policies above are what limit it
+  to read + insert. For real public deployments consider adding Supabase's rate limiting, a
+  moderation flag column, or captcha at the edge.</p>
+
+  <h2><span class="n">4</span>Where things live</h2>
+  <pre><code>index.html        app shell
+setup.html        this guide
+serve.py          dev server (correct MIME types + screenshot helper)
+css/style.css     theme
+js/
+  main.js         bootstrap, frame loop, toolbar
+  renderer.js     deferred + forward PBR pipelines, bloom, tonemap
+  shaderlib.js    GLSL library + user-shader wrappers (the material API)
+  particles.js    emitters: spawn/burst/loop, curves, instancing
+  materials.js    material model + per-variant compilation
+  presets.js      built-in example effects
+  ui.js           inspector, shader editor panel, modals
+  editor.js       GLSL code editor (highlighting, errors)
+  widgets.js      curve + gradient canvas editors
+  curves.js       curve/gradient models, LUT baking
+  geometry.js     quad/cube/sphere meshes + OBJ parser
+  camera.js       orbit camera
+  share.js        URL sharing, JSON export, localStorage library
+  backend.js      community gallery (Supabase REST) — configure in step 3
+  glutil.js / math3d.js   WebGL2 + math helpers</code></pre>
+
+  <p class="muted" style="margin-top:40px">Have fun. The <b>?</b> button in the editor documents the
+  full shader API (PBR Surface struct, particle inputs, noise library).</p>
+</div>
+</body>
+</html>
