@@ -1,0 +1,5 @@
+# Machine-local Claude Code settings
+.claude/settings.local.json
+
+# Output of serve.py's /__shot screenshot helper
+_shots/

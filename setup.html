@@ -94,14 +94,23 @@ python serve.py            # then open http://localhost:8917</code></pre>
   Share links keep working on any host since the effect data lives in the URL fragment.</p>
 
   <h3>Option A — GitHub Pages (recommended)</h3>
+  <p>Create an empty repo at <a href="https://github.com/new">github.com/new</a>, then push:</p>
   <pre><code>cd C:\projects\particletoy
 git init
 git add -A
 git commit -m "particletoy"
-gh repo create particletoy --public --source . --push
-gh api -X POST repos/{owner}/particletoy/pages -f build_type=workflow 2&gt;$null
-# or simply: repo Settings → Pages → Deploy from branch → main / (root)</code></pre>
-  <p>Your app appears at <code>https://&lt;you&gt;.github.io/particletoy/</code> in a minute or two.</p>
+git remote add origin https://github.com/&lt;you&gt;/particletoy.git
+git push -u origin master</code></pre>
+  <p>Pushing does <b>not</b> publish the site on its own — you have to switch Pages on once,
+  in the browser: <b>repo → Settings → Pages</b>, set <b>Source</b> to “Deploy from a branch”,
+  <b>Branch</b> to the one you pushed (<code>master</code> or <code>main</code>) with folder
+  <code>/ (root)</code>, then <b>Save</b>.</p>
+  <p>Your app appears at <code>https://&lt;you&gt;.github.io/particletoy/</code> a minute or two later.
+  The <code>.nojekyll</code> file in the repo root tells Pages to serve the files exactly as they
+  are rather than running them through Jekyll.</p>
+  <p class="muted">If you have the <a href="https://cli.github.com/">GitHub CLI</a> installed,
+  <code>gh repo create particletoy --public --source . --push</code> replaces the repo-creation step
+  and both <code>remote</code>/<code>push</code> lines. You still enable Pages in Settings.</p>
 
   <h3>Option B — Netlify / Cloudflare Pages / Vercel</h3>
   <ul>
