@@ -279,17 +279,38 @@ export class CurveEditor {
       this._moved = false;
       const side = this._handleAt(p.x, p.y, w, h);
       if (side) {
+        this._lastTap = null;
         this.drag = { type: side };
         return;
       }
       const i = this._keyAt(p.x, p.y, w, h);
       if (i >= 0) {
+        this._lastTap = null;
         this.selected = i;
         this.drag = { type: 'point', index: i };
         this._syncTools();
         this.draw();
         return;
       }
+      // Manual double-tap detection: touch doesn't reliably fire 'dblclick'
+      // (especially with touch-action: none), so this is the primary way to
+      // add a point on mobile. Desktop keeps using the native 'dblclick'
+      // listener below — gated to touch so the two paths never both fire.
+      const now = performance.now();
+      if (e.pointerType === 'touch' && this._lastTap && now - this._lastTap.time < 500 && Math.hypot(p.x - this._lastTap.x, p.y - this._lastTap.y) < 20) {
+        const [t, v] = this._fromPx(p.x, p.y, w, h);
+        this.curve.keys.push({ t, v });
+        sortCurve(this.curve);
+        this.selected = this.curve.keys.findIndex((k) => k.t === t && k.v === v);
+        this._lastTap = null;
+        // let the finger keep dragging the just-added point without lifting
+        this.drag = { type: 'point', index: this.selected };
+        this._syncTools();
+        this.draw();
+        this.onChange?.();
+        return;
+      }
+      if (e.pointerType === 'touch') this._lastTap = { time: now, x: p.x, y: p.y };
       this._panLast = p;
       this.drag = { type: 'pan' };
     });
@@ -559,11 +580,32 @@ export class GradientEditor {
       const i = this._stopAt(x, w);
       if (i >= 0) {
         e.preventDefault();
+        this._lastTap = null;
         this.selected = i;
         this.drag = i;
         c.setPointerCapture(e.pointerId);
         this.draw();
+        return;
       }
+      // Manual double-tap detection: touch doesn't reliably fire 'dblclick'.
+      // Desktop keeps using the native 'dblclick' listener below — gated to
+      // touch so the two paths never both fire (avoids e.g. popping the
+      // colour picker right after a desktop double-click adds a stop).
+      if (e.pointerType === 'touch') e.preventDefault();
+      const now = performance.now();
+      if (e.pointerType === 'touch' && this._lastTap && now - this._lastTap.time < 500 && Math.abs(x - this._lastTap.x) < 20) {
+        const t = clamp((x - PAD) / (w - PAD * 2), 0, 1);
+        this.gradient.stops.push({ t, c: evalGradient(this.gradient, t) });
+        sortGradient(this.gradient);
+        this.selected = this.gradient.stops.findIndex((s) => s.t === t);
+        this._lastTap = null;
+        c.setPointerCapture(e.pointerId);
+        this.drag = this.selected;
+        this.draw();
+        this.onChange?.();
+        return;
+      }
+      if (e.pointerType === 'touch') this._lastTap = { time: now, x };
     });
     c.addEventListener('pointermove', (e) => {
       if (this.drag === null) return;
