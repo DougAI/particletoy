@@ -172,6 +172,9 @@ export class Renderer {
     const viewProj = mat4Multiply(camera.proj, camera.view);
     const invViewProj = mat4Invert(viewProj);
     const viewDir = [-camera.view[2], -camera.view[6], -camera.view[10]];
+    // Stashed for drawEmitter: materials reconstruct world position from the
+    // sampled scene depth with this.
+    this.invViewProj = invViewProj;
 
     // ---- classify draws
     const opaque = [], blended = [];
@@ -376,6 +379,15 @@ export class Renderer {
       prog.set2f('uCamNearFar', CAM_NEAR, CAM_FAR);
       prog.bindTex('uSceneDepth', 1, this.depthB);
       prog.set1f('uSoftDistance', m.softDistance);
+      // Scene reads. The G-buffer only holds meaningful data in the deferred
+      // pipeline, where this pass runs after the lighting pass; sampling it is
+      // safe because the G-buffer textures are not attached to the scene FBO.
+      const hasGBuffer = frame.pipeline === 'deferred';
+      prog.set1i('uHasGBuffer', hasGBuffer ? 1 : 0);
+      prog.setMat4('uInvViewProj', this.invViewProj);
+      prog.bindTex('uGBufA', 2, hasGBuffer ? this.gbufA : this.blackTex);
+      prog.bindTex('uGBufB', 3, hasGBuffer ? this.gbufB : this.blackTex);
+      prog.bindTex('uGBufC', 4, hasGBuffer ? this.gbufC : this.blackTex);
     }
     gl.bindVertexArray(em.vao);
     gl.drawElementsInstanced(gl.TRIANGLES, em.mesh.count, em.mesh.indexType, 0, n);

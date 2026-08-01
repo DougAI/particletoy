@@ -184,6 +184,106 @@ float linearizeDepth(float d){
 }
 `;
 
+// ---------------------------------------------------------------- G-buffer reads
+//
+// Materials can sample the scene behind them. In the deferred pipeline the
+// blended pass runs after the G-buffer and lighting passes, so the full
+// G-buffer is readable there — that is what makes refraction, distortion,
+// scene-aware tinting and contact effects possible.
+//
+// The same API is compiled into BOTH variants so user code never breaks when a
+// material is used as opaque (which writes the G-buffer and therefore cannot
+// read it) or under the forward pipeline (which has no G-buffer at all). In
+// those cases gbufferAvailable() is false and the material channels read as
+// neutral defaults. Depth is available in the forward pipeline too.
+const GBUFFER_STRUCT = `
+struct GBuffer {
+  vec3  albedo;
+  float metallic;
+  vec3  normal;       // world space
+  float roughness;
+  vec3  emissive;
+  float occlusion;
+  float depth;        // raw 0..1 (1.0 = nothing drawn / sky)
+  float linearDepth;  // world units from the camera
+  vec3  positionWS;   // reconstructed world position
+  bool  valid;        // false on sky, or when no G-buffer is bound
+};
+vec2 screenUV(){ return gl_FragCoord.xy / uResolution; }
+`;
+
+const GBUFFER_READ = GBUFFER_STRUCT + `
+uniform sampler2D uGBufA;     // albedo + metallic
+uniform sampler2D uGBufB;     // normal + roughness
+uniform sampler2D uGBufC;     // emissive + occlusion
+uniform sampler2D uSceneDepth;
+uniform float uSoftDistance;
+uniform mat4 uInvViewProj;
+uniform int uHasGBuffer;
+
+bool gbufferAvailable(){ return uHasGBuffer == 1; }
+
+float sceneDepth(vec2 uv){ return texture(uSceneDepth, uv).r; }
+float sceneLinearDepth(vec2 uv){ return linearizeDepth(sceneDepth(uv)); }
+vec3 sceneWorldPos(vec2 uv){
+  float d = sceneDepth(uv);
+  vec4 wp = uInvViewProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+  return wp.xyz / wp.w;
+}
+
+GBuffer sampleGBuffer(vec2 uv){
+  GBuffer g;
+  float d = sceneDepth(uv);
+  g.depth = d;
+  g.linearDepth = linearizeDepth(d);
+  g.positionWS = sceneWorldPos(uv);
+  if (uHasGBuffer == 1) {
+    vec4 a = texture(uGBufA, uv);
+    vec4 b = texture(uGBufB, uv);
+    vec4 c = texture(uGBufC, uv);
+    g.albedo = a.rgb;
+    g.metallic = a.a;
+    g.normal = normalize(b.rgb * 2.0 - 1.0);
+    g.roughness = b.a;
+    g.emissive = c.rgb;
+    g.occlusion = c.a;
+    g.valid = d < 1.0;
+  } else {
+    g.albedo = vec3(0.0);
+    g.metallic = 0.0;
+    g.normal = vec3(0.0, 1.0, 0.0);
+    g.roughness = 1.0;
+    g.emissive = vec3(0.0);
+    g.occlusion = 1.0;
+    g.valid = false;
+  }
+  return g;
+}
+`;
+
+// Inert version for the G-buffer variant: same signatures, no samplers, so a
+// material that reads the scene still compiles when drawn as opaque.
+const GBUFFER_STUB = GBUFFER_STRUCT + `
+bool gbufferAvailable(){ return false; }
+float sceneDepth(vec2 uv){ return 1.0; }
+float sceneLinearDepth(vec2 uv){ return 0.0; }
+vec3 sceneWorldPos(vec2 uv){ return vec3(0.0); }
+GBuffer sampleGBuffer(vec2 uv){
+  GBuffer g;
+  g.albedo = vec3(0.0);
+  g.metallic = 0.0;
+  g.normal = vec3(0.0, 1.0, 0.0);
+  g.roughness = 1.0;
+  g.emissive = vec3(0.0);
+  g.occlusion = 1.0;
+  g.depth = 1.0;
+  g.linearDepth = 0.0;
+  g.positionWS = vec3(0.0);
+  g.valid = false;
+  return g;
+}
+`;
+
 // ---------------------------------------------------------------- particle VS
 const PARTICLE_VS_PRELUDE = `
 layout(location = 0) in vec3 aPos;
@@ -319,9 +419,9 @@ ${FS_SURFACE_SETUP}
 }
 `;
 
+// uSceneDepth / uSoftDistance are declared in the G-buffer block above, which
+// has to precede the user's code so their shader can call sceneDepth().
 const FS_FORWARD_MAIN = `
-uniform sampler2D uSceneDepth;
-uniform float uSoftDistance;
 layout(location = 0) out vec4 oColor;
 void main(){
 ${FS_SURFACE_SETUP}
@@ -360,7 +460,9 @@ export function buildParticleFS(userCode, variant, opts) {
     (opts.soft && variant === 'forward' ? '#define SOFT_PARTICLES\n' : '');
   let prelude = VERSION + defines + COMMON_UNIFORMS + PARTICLE_FS_VARYINGS + NOISE_GLSL + STRUCTS_GLSL;
   if (variant === 'forward') {
-    prelude += LIGHT_UNIFORMS + PBR_GLSL + DEPTH_UTIL;
+    prelude += LIGHT_UNIFORMS + PBR_GLSL + DEPTH_UTIL + GBUFFER_READ;
+  } else {
+    prelude += GBUFFER_STUB;
   }
   const main = variant === 'gbuffer' ? FS_GBUFFER_MAIN : FS_FORWARD_MAIN;
   return { src: prelude + userCode + '\n' + main, lineOffset: countLines(prelude) };

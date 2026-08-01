@@ -241,9 +241,31 @@ input[type="checkbox"] { accent-color: var(--accent-2); width: 15px; height: 15p
 .material-name { font-weight: 600; }
 
 .curve-holder { flex: 1; min-width: 180px; }
-.curve-canvas { width: 100%; height: 64px; display: block; border-radius: 5px; cursor: crosshair; }
-.gradient-canvas { width: 100%; height: 36px; display: block; border-radius: 5px; cursor: pointer; }
-.gradient-color-input { width: 0; height: 0; opacity: 0; position: absolute; }
+.curve-canvas { width: 100%; height: 116px; display: block; border-radius: 5px; cursor: crosshair; }
+.gradient-canvas { width: 100%; height: 44px; display: block; border-radius: 5px; cursor: pointer; }
+
+/* Selected-stop controls under the gradient bar. The colour input is a real,
+   visible swatch — a hidden zero-size input cannot open the native picker. */
+.gradient-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.gradient-color-input {
+  width: 34px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-2);
+  cursor: pointer;
+  flex: none;
+}
+.gradient-color-input::-webkit-color-swatch-wrapper { padding: 2px; }
+.gradient-color-input::-webkit-color-swatch { border: none; border-radius: 2px; }
+.gradient-stop-info { font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
+.gradient-tools .btn-small { margin-left: auto; }
 
 /* ---------------------------------------------------------------- editor */
 #editor-toolbar {

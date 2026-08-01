@@ -520,6 +520,42 @@ struct SurfaceInput {
 in a fullscreen pass; blended particles are forward-lit. In the <b>Forward</b> pipeline
 everything is lit inline. Unlit materials skip lighting: output = albedo + emissive.</p>
 
+<h3>Reading the scene &amp; G-buffer</h3>
+<p>A fragment stage can sample what is already behind the particle. In the
+<b>Deferred</b> pipeline the blended pass runs after the G-buffer and lighting passes,
+so the whole G-buffer is readable — this is what makes refraction, distortion and
+scene-aware tinting possible.</p>
+<pre>vec2 screenUV()            // this fragment's screen UV, 0..1
+bool gbufferAvailable()    // true only in Deferred, on a blended material
+GBuffer sampleGBuffer(vec2 uv)
+
+float sceneDepth(vec2 uv)        // raw 0..1 (1.0 = sky / nothing)
+float sceneLinearDepth(vec2 uv)  // world units from the camera
+vec3  sceneWorldPos(vec2 uv)     // reconstructed world position</pre>
+<pre>struct GBuffer {
+  vec3 albedo;      float metallic;
+  vec3 normal;      float roughness;   // normal is world space
+  vec3 emissive;    float occlusion;
+  float depth;      float linearDepth;
+  vec3 positionWS;
+  bool valid;       // false on sky, or when no G-buffer is bound
+};</pre>
+<p>Example — refract the scene behind an additive/blended particle:</p>
+<pre>vec2 uv = screenUV();
+vec2 offset = (i.normalWS.xy) * 0.03 * i.color.a;
+GBuffer g = sampleGBuffer(uv + offset);
+s.emissive = g.albedo * 2.0;      // pick up what's behind
+s.alpha = i.color.a;</pre>
+<p>Example — fade out where the particle meets solid geometry:</p>
+<pre>float d = sceneLinearDepth(screenUV()) - distance(uCameraPos, i.positionWS);
+s.alpha *= clamp(d / 0.4, 0.0, 1.0);</pre>
+<p class="muted">The same functions exist in every variant so a material never fails to
+compile, but an <b>opaque</b> surface is what <i>writes</i> the G-buffer and so cannot read
+it, and the <b>Forward</b> pipeline has no G-buffer at all. In both cases
+<code>gbufferAvailable()</code> is false and the material channels read as neutral
+defaults — depth still works in Forward. Always branch on it, or on <code>g.valid</code>,
+if your effect must survive a pipeline switch.</p>
+
 <h3>Built-in uniforms</h3>
 <pre>uTime (iTime)          effect time, seconds
 uResolution (iResolution)

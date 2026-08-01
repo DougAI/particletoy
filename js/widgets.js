@@ -37,7 +37,7 @@ export class CurveEditor {
   _dims() {
     const dpr = window.devicePixelRatio || 1;
     const w = this.canvas.clientWidth || 220;
-    const h = this.canvas.clientHeight || 64;
+    const h = this.canvas.clientHeight || 116;
     if (this.canvas.width !== w * dpr || this.canvas.height !== h * dpr) {
       this.canvas.width = w * dpr;
       this.canvas.height = h * dpr;
@@ -140,10 +140,17 @@ export class CurveEditor {
       const x = PAD + (i / 4) * (w - PAD * 2);
       g.beginPath(); g.moveTo(x, PAD); g.lineTo(x, h - PAD); g.stroke();
     }
-    for (let i = 0; i <= 2; i++) {
-      const y = PAD + (i / 2) * (h - PAD * 2);
+    for (let i = 0; i <= 4; i++) {
+      const y = PAD + (i / 4) * (h - PAD * 2);
       g.beginPath(); g.moveTo(PAD, y); g.lineTo(w - PAD, y); g.stroke();
     }
+    // value range labels — the extra height leaves room to read the axis
+    g.fillStyle = '#6d727e';
+    g.font = '10px ui-monospace, Consolas, monospace';
+    g.textBaseline = 'top';
+    g.fillText(String(+this.vMax.toFixed(2)), PAD + 3, PAD + 2);
+    g.textBaseline = 'bottom';
+    g.fillText(String(+this.vMin.toFixed(2)), PAD + 3, h - PAD - 2);
     g.strokeStyle = '#e8a33d';
     g.lineWidth = 1.5;
     g.beginPath();
@@ -173,26 +180,69 @@ export class GradientEditor {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'gradient-canvas';
     container.appendChild(this.canvas);
+
+    // Controls for the selected stop. The swatch is always visible so setting
+    // a colour is a single obvious click, rather than relying on a hidden
+    // input that browsers refuse to open a picker for.
+    const tools = document.createElement('div');
+    tools.className = 'gradient-tools';
     this.colorInput = document.createElement('input');
     this.colorInput.type = 'color';
     this.colorInput.className = 'gradient-color-input';
-    container.appendChild(this.colorInput);
-    this.colorInput.addEventListener('input', () => {
+    this.colorInput.title = 'Colour of the selected stop';
+    this.info = document.createElement('span');
+    this.info.className = 'gradient-stop-info';
+    this.delBtn = document.createElement('button');
+    this.delBtn.type = 'button';
+    this.delBtn.className = 'btn btn-small';
+    this.delBtn.textContent = 'Remove stop';
+    tools.append(this.colorInput, this.info, this.delBtn);
+    container.appendChild(tools);
+
+    const applyColor = () => {
       const s = this.gradient.stops[this.selected];
-      if (s) {
-        s.c = hexToLin(this.colorInput.value);
-        this.draw();
-        this.onChange?.();
-      }
+      if (!s) return;
+      s.c = hexToLin(this.colorInput.value);
+      this.draw();
+      this.onChange?.();
+    };
+    this.colorInput.addEventListener('input', applyColor);
+    this.colorInput.addEventListener('change', applyColor);
+
+    this.delBtn.addEventListener('click', () => {
+      if (this.gradient.stops.length <= 1) return;
+      this.gradient.stops.splice(this.selected, 1);
+      this.selected = Math.max(0, this.selected - 1);
+      this.draw();
+      this.onChange?.();
     });
+
     this._bind();
     requestAnimationFrame(() => this.draw());
+  }
+
+  /** Opens the native colour picker for the selected stop. */
+  _openPicker() {
+    const s = this.gradient.stops[this.selected];
+    if (!s) return;
+    this.colorInput.value = linToHex(s.c);
+    // showPicker() is the reliable path; click() is the older fallback.
+    try { this.colorInput.showPicker(); } catch { this.colorInput.click(); }
+  }
+
+  _syncTools() {
+    const s = this.gradient.stops[this.selected];
+    if (!s) return;
+    this.colorInput.value = linToHex(s.c);
+    this.info.textContent =
+      `stop ${this.selected + 1}/${this.gradient.stops.length} · pos ${s.t.toFixed(2)}`;
+    this.delBtn.disabled = this.gradient.stops.length <= 1;
   }
 
   _dims() {
     const dpr = window.devicePixelRatio || 1;
     const w = this.canvas.clientWidth || 220;
-    const h = this.canvas.clientHeight || 34;
+    const h = this.canvas.clientHeight || 44;
     if (this.canvas.width !== w * dpr || this.canvas.height !== h * dpr) {
       this.canvas.width = w * dpr;
       this.canvas.height = h * dpr;
@@ -249,10 +299,10 @@ export class GradientEditor {
       const [x] = pos(e);
       const i = this._stopAt(x, w);
       if (i >= 0) {
-        // edit existing stop color
+        // edit existing stop colour
         this.selected = i;
-        this.colorInput.value = linToHex(this.gradient.stops[i].c);
-        this.colorInput.click();
+        this.draw();
+        this._openPicker();
       } else {
         const t = clamp((x - PAD) / (w - PAD * 2), 0, 1);
         this.gradient.stops.push({ t, c: evalGradient(this.gradient, t) });
@@ -277,6 +327,7 @@ export class GradientEditor {
   }
 
   draw() {
+    this._syncTools();
     const { w, h, dpr } = this._dims();
     const g = this.canvas.getContext('2d');
     g.save();

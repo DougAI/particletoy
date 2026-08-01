@@ -59,8 +59,12 @@ export class OrbitCamera {
         this.yaw += dx * 0.35;
         this.pitch = clamp(this.pitch + dy * 0.3, -89, 89);
       } else {
+        // Camera sits at yaw around +Y, looking inward, so its horizontal
+        // forward is -[cos(y), 0, sin(y)] and right = cross(forward, up)
+        // = [sin(y), 0, -cos(y)]. Dragging right must push the target the
+        // other way for the scene to travel with the cursor.
         const y = degToRad(this.yaw);
-        const right = [-Math.sin(y), 0, Math.cos(y)];
+        const right = [Math.sin(y), 0, -Math.cos(y)];
         const k = this.dist * 0.0016;
         this.target[0] -= right[0] * dx * k;
         this.target[2] -= right[2] * dx * k;
