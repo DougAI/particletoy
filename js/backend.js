@@ -7,8 +7,8 @@
 // it. Until then, publish/browse show a friendly "not configured" message.
 
 // ─── FILL THESE IN (see setup.html, step 3) ─────────────────────────────────
-const SUPABASE_URL = '';      // e.g. 'https://abcdefgh.supabase.co'
-const SUPABASE_ANON_KEY = ''; // the "anon public" API key from your project
+const SUPABASE_URL = 'https://kqbbghyfpxxowwhdtjnj.supabase.co';      // e.g. 'https://abcdefgh.supabase.co'
+const SUPABASE_ANON_KEY = 'sb_publishable_JsVww6ububer-Yi-s0AG4A_0Di7CjOh'; // the "anon public" API key from your project
 // ────────────────────────────────────────────────────────────────────────────
 
 export function backendConfigured() {
