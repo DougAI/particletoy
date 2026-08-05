@@ -273,7 +273,8 @@ function buildEmitterSections(root, app, em) {
         buildInspector(app);
       }));
       const note = el('p', null,
-        'Custom fields become members of the sim\'s Particle struct. The sections below still feed sp.* uniforms — the default sim uses them; a custom sim may ignore them.');
+        'Custom fields become members of the sim\'s Particle struct. The sections below still feed sp.* uniforms — the default sim uses them; a custom sim may ignore them. '
+        + 'Size / Color / Alpha over life are the exception: those are applied when the particle is drawn, so they keep working whatever the sim does.');
       note.className = 'muted';
       note.style.fontSize = '11px';
       sim.appendChild(note);
@@ -328,7 +329,10 @@ function buildEmitterSections(root, app, em) {
     mo.appendChild(row('Gravity', vec3In(p.gravity, () => {})));
     mo.appendChild(row('Drag', numIn(p.drag, (x) => { p.drag = Math.max(0, x); }, { min: 0, step: 0.1 })));
     const cw = el('div', 'curve-holder');
-    new CurveEditor(cw, { curve: p.speedOverLife, vMin: 0, vMax: 2, onChange: () => {} });
+    // Must dirty the LUT: the CPU sim reads this curve object directly every
+    // frame, but a compute sim samples the baked texture — without this, edits
+    // are invisible in shader mode until some other curve triggers a re-bake.
+    new CurveEditor(cw, { curve: p.speedOverLife, vMin: 0, vMax: 2, onChange: lut });
     mo.appendChild(row('Speed / life', cw));
   }
 
@@ -681,11 +685,24 @@ struct SimCtx   { index: u32, dt: f32, time: f32 }</pre>
 <pre>rand() -> f32                   // fresh 0..1 each call, deterministic per particle
 randRange(lo, hi) -> f32
 randUnitVec() -> vec3f
-curveSpeed(life01) -> f32       // the Speed/life curve
+curveSpeed(life01) -> f32       // the Speed/life curve — apply this yourself
+curveSize(life01)  -> f32       // Size/life  ┐ already applied at draw time;
+curveColor(life01) -> vec3f     // Color/life ├ read them, don't re-multiply
+curveAlpha(life01) -> f32       // Alpha/life ┘
 sp.*                            // every emitter property as a uniform:
    emitterPos gravity drag boxSize colorA colorB speedRange lifetimeRange
    sizeRange rotationRange rotSpeedRange spread shapeRadius shapeAngle
    shapeType capacity dt time</pre>
+
+<h4>Over-lifetime curves</h4>
+<p>The emitter's <b>/ life</b> curves are baked into one small lookup texture that the
+sim and the renderer share. <b>Speed/life</b> is the sim's to apply — that's the
+<code>curveSpeed()</code> call in the default <code>simulate()</code>, and deleting it
+switches the curve off. <b>Size</b>, <b>Color</b> and <b>Alpha</b> over life are applied
+when the particle is drawn instead, identically in both sim modes: <code>p.size</code> and
+<code>p.color</code> are the values at birth and the curves scale them each frame. Those
+three keep working whatever your sim does, so read them if you need the drawn size
+(<code>p.size * curveSize(life01)</code>) but don't multiply them into the particle.</p>
 
 <h4>Reading the other particles</h4>
 <p><code>neighbors</code> is a read-only snapshot of the whole particle array as of

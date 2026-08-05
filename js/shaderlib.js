@@ -14,6 +14,7 @@
 // WGSL structs and the JS byte offsets always agree.
 
 import { defineBlock } from './gpu.js';
+import { LUT_ROW, lutRowV, LUT_SAMPLE_WGSL } from './curves.js';
 
 // Render-target formats shared by the renderer (pass setup) and materials
 // (pipeline fragment targets). Living here avoids an import cycle.
@@ -67,7 +68,7 @@ const DRAW_BINDING = `${DRAW_STRUCT}
 const LUT_BINDINGS = `
 @group(0) @binding(2) var ptSamp: sampler;
 @group(0) @binding(3) var ptLut: texture_2d<f32>;
-`;
+${LUT_SAMPLE_WGSL}`;
 
 const SCENE_READ_BINDINGS = `
 @group(0) @binding(4) var ptDepth: texture_depth_2d;
@@ -361,8 +362,11 @@ struct VSOut {
   let life = vin.iMisc.x;
   let seed = vin.iMisc.y;
   let rot = vin.iMisc.z;
-  let lifeColor = textureSampleLevel(ptLut, ptSamp, vec2f(life, 0.166667), 0.0);
-  let sizeMul = textureSampleLevel(ptLut, ptSamp, vec2f(life, 0.5), 0.0).r;
+  // Over-lifetime curves are applied here, after the sim (CPU or compute) has
+  // produced the particle's start color and base size.
+  let lutU = ptLutU(life);
+  let lifeColor = textureSampleLevel(ptLut, ptSamp, vec2f(lutU, ${lutRowV(LUT_ROW.color)}), 0.0);
+  let sizeMul = textureSampleLevel(ptLut, ptSamp, vec2f(lutU, ${lutRowV(LUT_ROW.size)}), 0.0).r;
   let size = vin.iPosSize.w * sizeMul;
   let centerWS = vin.iPosSize.xyz;
 
