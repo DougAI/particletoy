@@ -7,7 +7,7 @@ import { Emitter, defaultEmitterParams } from './particles.js';
 import { makeMaterial, MaterialRuntime, serializeMaterial } from './materials.js';
 import { migrateMaterial } from './glsl2wgsl.js';
 import { PRESETS } from './presets.js';
-import { buildInspector, EditorPanel, modal, toast, showHelp, setHistoryRecorder } from './ui.js';
+import { buildInspector, EditorPanel, modal, toast, showHelp, setHistoryRecorder, isTextEditing } from './ui.js';
 import { History } from './history.js';
 import {
   serializeState, encodeShareString, decodeShareString,
@@ -173,19 +173,18 @@ const history = new History({
   getState: () => JSON.stringify(currentData()),
   setState: (snap) => applyData(JSON.parse(snap)),
 });
-setHistoryRecorder(() => history.record());
+setHistoryRecorder((source) => history.record(source));
 window.__particletoy.history = history;
 
 window.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   const key = e.key.toLowerCase();
   if (key !== 'z' && key !== 'y') return;
-  const t = document.activeElement;
-  // Text-editable fields keep their native undo (Ctrl+Z mid-typing should
-  // revert characters, not jump the whole effect back a step).
-  const textEditing = t && (t.tagName === 'TEXTAREA'
-    || (t.tagName === 'INPUT' && ['text', 'number', 'email', 'search', 'tel', 'url', 'password'].includes(t.type)));
-  if (textEditing) return;
+  // A field being typed into keeps its native undo (Ctrl+Z mid-typing should
+  // revert characters, not jump the whole effect back a step). Spinner clicks
+  // and arrow keys on a number field are not typing — they are recorded state
+  // changes, so they fall through to the app-level stack below.
+  if (isTextEditing(document.activeElement)) return;
   e.preventDefault();
   const redo = key === 'y' || e.shiftKey;
   const did = redo ? history.redo() : history.undo();

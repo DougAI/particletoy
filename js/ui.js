@@ -14,8 +14,26 @@ import { PROPS_SIM_SRC, FIELD_TYPES } from './simlib.js';
 // factories, so recording here — rather than at each of their call sites —
 // covers sliders, spinner arrows, checkboxes, dropdowns, colors and buttons
 // (and, via the shared `lut` callback, the curve/gradient editors) in one place.
+// The argument identifies the control, so History only coalesces consecutive
+// changes that came from the same one.
 let recordChange = () => {};
 export function setHistoryRecorder(fn) { recordChange = fn; }
+
+// Fields the user is actively typing into, which keep the browser's native
+// per-character Ctrl+Z instead of triggering an app-level undo. Membership is
+// driven by real keystrokes (see numIn) rather than by input type, because a
+// number field is text-editable *and* spinner-driven: arrow clicks and arrow
+// keys are ordinary recorded state changes and must reach the app's undo
+// stack, while mid-typing Ctrl+Z should still just revert characters.
+const typedIn = new WeakSet();
+
+export function isTextEditing(node) {
+  if (!node) return false;
+  if (node.tagName === 'TEXTAREA') return true;
+  if (node.tagName !== 'INPUT') return false;
+  if (node.type === 'number') return typedIn.has(node);
+  return ['text', 'email', 'search', 'tel', 'url', 'password'].includes(node.type);
+}
 
 function el(tag, cls, text) {
   const e = document.createElement(tag);
@@ -42,13 +60,19 @@ function numIn(v, onCh, { step = 0.1, min, max, w } = {}) {
   if (max !== undefined) i.max = max;
   if (w) i.style.width = w + 'px';
   i.value = typeof v === 'number' ? +v.toFixed(4) : v;
+  i.addEventListener('focus', () => typedIn.delete(i));
+  i.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return; // Ctrl+Z itself isn't typing
+    if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete') typedIn.add(i);
+  });
   i.addEventListener('change', () => {
+    typedIn.delete(i); // value committed — Ctrl+Z now belongs to app history
     let x = parseFloat(i.value);
     if (Number.isNaN(x)) x = 0;
     if (min !== undefined) x = Math.max(min, x);
     if (max !== undefined) x = Math.min(max, x);
     i.value = x;
-    recordChange();
+    recordChange(i);
     onCh(x);
   });
   return i;
@@ -60,7 +84,7 @@ function slider(v, onCh, { min = 0, max = 1, step = 0.01 } = {}) {
   s.type = 'range';
   s.min = min; s.max = max; s.step = step; s.value = v;
   const n = numIn(v, (x) => { s.value = x; onCh(x); }, { step, min, max, w: 52 });
-  s.addEventListener('input', () => { n.value = s.value; recordChange(); onCh(parseFloat(s.value)); });
+  s.addEventListener('input', () => { n.value = s.value; recordChange(s); onCh(parseFloat(s.value)); });
   wrap.append(s, n);
   return wrap;
 }
@@ -85,7 +109,7 @@ function check(v, onCh) {
   const i = el('input');
   i.type = 'checkbox';
   i.checked = !!v;
-  i.addEventListener('change', () => { recordChange(); onCh(i.checked); });
+  i.addEventListener('change', () => { recordChange(i); onCh(i.checked); });
   return i;
 }
 
@@ -97,7 +121,7 @@ function selectIn(options, v, onCh) {
     s.appendChild(o);
   }
   s.value = v;
-  s.addEventListener('change', () => { recordChange(); onCh(s.value); });
+  s.addEventListener('change', () => { recordChange(s); onCh(s.value); });
   return s;
 }
 
@@ -108,7 +132,7 @@ function colorIn(arr, onCh) {
   i.addEventListener('input', () => {
     const c = hexToLin(i.value);
     arr[0] = c[0]; arr[1] = c[1]; arr[2] = c[2];
-    recordChange();
+    recordChange(i);
     onCh();
   });
   return i;
@@ -126,7 +150,7 @@ function btn(label, onClick, cls = 'btn') {
   b.type = 'button';
   // Recorded unconditionally — History.flush() drops the entry if the click
   // (e.g. closing a modal) turned out not to change app state.
-  b.addEventListener('click', () => { recordChange(); onClick(); });
+  b.addEventListener('click', () => { recordChange(b); onClick(); });
   return b;
 }
 
@@ -219,14 +243,14 @@ function buildEmitterSections(root, app, em) {
   const p = em.p;
   // Also the onChange for CurveEditor/GradientEditor (below) — routing their
   // drag/add/delete mutations through the same recorder as everything else.
-  const lut = () => { recordChange(); app.markLut(em); };
+  const lut = () => { recordChange(lut); app.markLut(em); };
 
   // ---- general
   const g = section(root, `Emitter — ${p.name}`);
   {
     const nameIn = el('input', 'text-in');
     nameIn.value = p.name;
-    nameIn.addEventListener('change', () => { recordChange(); p.name = nameIn.value || 'Emitter'; buildInspector(app); });
+    nameIn.addEventListener('change', () => { recordChange(nameIn); p.name = nameIn.value || 'Emitter'; buildInspector(app); });
     g.appendChild(row('Name', nameIn));
     g.appendChild(row('Position', vec3In(p.position, () => {})));
     g.appendChild(row('Duration (s)', numIn(p.duration, (x) => { p.duration = Math.max(0.05, x); }, { min: 0.05, step: 0.5 })));
@@ -264,7 +288,7 @@ function buildEmitterSections(root, app, em) {
         nameIn.style.width = '110px';
         nameIn.value = f.name;
         nameIn.addEventListener('change', () => {
-          recordChange();
+          recordChange(nameIn);
           const clean = nameIn.value.replace(/\W/g, '').replace(/^\d+/, '');
           if (clean) f.name = clean;
           app.markSim(em);
@@ -408,7 +432,7 @@ function buildMaterialSections(root, app) {
 
     const nameIn = el('input', 'text-in');
     nameIn.value = m.name;
-    nameIn.addEventListener('change', () => { recordChange(); m.name = nameIn.value || 'Material'; app.refreshUI(); });
+    nameIn.addEventListener('change', () => { recordChange(nameIn); m.name = nameIn.value || 'Material'; app.refreshUI(); });
     box.appendChild(row('Name', nameIn));
     box.appendChild(row('Blend', selectIn(
       [['opaque', 'Opaque'], ['cutout', 'Cutout'], ['blend', 'Alpha Blend'], ['add', 'Additive']],
