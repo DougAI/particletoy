@@ -27,18 +27,37 @@ export function getVideoMimeType() {
   return null;
 }
 
-function makeExportPlayer(data, camera, pipeline, w, h) {
+// Async because EffectPlayer creates its device, renderer and camera in an
+// async setup step — touching player.camera/renderer before `ready` resolves
+// throws. Also waits on the material compiles so the first frames aren't blank.
+async function makeExportPlayer(data, camera, pipeline, w, h) {
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
   const player = new EffectPlayer(canvas, { interactive: false, pipeline });
-  if (!player.ok) throw new Error(player.error || 'WebGL2 is not available for export');
-  player.load(data);
-  player.camera.target = [...camera.target];
-  player.camera.yaw = camera.yaw;
-  player.camera.pitch = camera.pitch;
-  player.camera.dist = camera.dist;
-  player.renderer.resize(w, h);
+  let ok = false;
+  try {
+    ok = await player.ready;
+  } catch (ex) {
+    player.dispose();
+    throw new Error(ex.message || 'WebGPU is not available for export');
+  }
+  if (!ok) {
+    player.dispose();
+    throw new Error(player.error || 'WebGPU is not available for export');
+  }
+  try {
+    player.load(data);
+    await player._loading;
+    player.camera.target = [...camera.target];
+    player.camera.yaw = camera.yaw;
+    player.camera.pitch = camera.pitch;
+    player.camera.dist = camera.dist;
+    player.renderer.resize(w, h);
+  } catch (ex) {
+    player.dispose();
+    throw ex;
+  }
   return { canvas, player };
 }
 
@@ -70,10 +89,14 @@ export async function exportVideo(opts) {
   const totalFrames = Math.max(1, Math.round(seconds * fps));
   const dt = 1 / fps;
 
-  const { canvas, player } = makeExportPlayer(data, camera, pipeline, w, h);
+  const { canvas, player } = await makeExportPlayer(data, camera, pipeline, w, h);
   try {
+    if (typeof canvas.captureStream !== 'function') {
+      throw new Error('This browser cannot record a canvas — try GIF instead.');
+    }
     const stream = canvas.captureStream(0);
     const track = stream.getVideoTracks()[0];
+    if (!track) throw new Error('Could not capture the export canvas — try GIF instead.');
     const manual = typeof track.requestFrame === 'function';
     const chunks = [];
     const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
@@ -107,7 +130,7 @@ export async function exportGif(opts) {
   const dt = 1 / fps;
   const delay = Math.round(1000 / fps);
 
-  const { canvas, player } = makeExportPlayer(data, camera, pipeline, w, h);
+  const { canvas, player } = await makeExportPlayer(data, camera, pipeline, w, h);
   const read = document.createElement('canvas');
   read.width = w;
   read.height = h;
