@@ -176,7 +176,7 @@ export function buildInspector(app) {
     cb.title = 'enabled';
     item.appendChild(cb);
     const name = el('span', 'emitter-name', em.p.name);
-    name.addEventListener('click', () => { app.selEmitter = i; buildInspector(app); });
+    name.addEventListener('click', () => app.selectEmitter(i));
     item.appendChild(name);
     item.appendChild(el('span', 'emitter-count', ''));
     list.appendChild(item);
@@ -449,6 +449,12 @@ export class EditorPanel {
     this.tab = 'fs';
     this.autoApply = true;
     this._debounce = null;
+    // What the visible text was loaded from: {tab, id, src}. The buffer is
+    // written back to *this* target, not to whatever happens to be selected
+    // when it is flushed — the selected emitter, and the whole document, can
+    // change out from under it. `src` is the text as loaded, so an untouched
+    // buffer never overwrites edits made elsewhere.
+    this.buf = null;
 
     this.toolbar = document.getElementById('editor-toolbar');
     this.errorsEl = document.getElementById('editor-errors');
@@ -503,7 +509,7 @@ export class EditorPanel {
     this.tabSim.classList.toggle('active', tab === 'sim');
     if (tab === 'sim') {
       const em = this.app.emitters[this.app.selEmitter];
-      this.editor.setValue(em ? em.p.simSrc : '');
+      this._load(em ? { tab, id: em.p.id } : null, em ? em.p.simSrc : '');
       this._showErrors(em ? (this.app.simErrors?.get(em.p.id) ?? []) : []);
       if (em && em.p.simMode !== 'shader') {
         const note = el('div', 'compile-err',
@@ -511,9 +517,31 @@ export class EditorPanel {
         this.errorsEl.prepend(note);
       }
     } else {
-      this.editor.setValue(m ? (tab === 'vs' ? m.vertexSrc : m.fragmentSrc) : '');
+      this._load(m ? { tab, id: m.id } : null, m ? (tab === 'vs' ? m.vertexSrc : m.fragmentSrc) : '');
       this._showErrors(this.app.materialErrors?.get(materialId) ?? []);
     }
+  }
+
+  // The Sim tab always shows the selected emitter, so re-point the buffer when
+  // the selection moves — otherwise it keeps showing the previous emitter's code.
+  onEmitterChanged() {
+    if (this.tab === 'sim') this.show(this.materialId, 'sim');
+  }
+
+  /**
+   * Drop the pending buffer without writing it back, and cancel any queued
+   * auto-apply. Call before the document is swapped out (preset load, import,
+   * share link): the text on screen belongs to the outgoing effect and must
+   * not land in whatever occupies that slot in the incoming one.
+   */
+  discardBuffer() {
+    clearTimeout(this._debounce);
+    this.buf = null;
+  }
+
+  _load(target, src) {
+    this.buf = target ? { ...target, src: src ?? '' } : null;
+    this.editor.setValue(src);
   }
 
   _scheduleApply() {
@@ -523,37 +551,34 @@ export class EditorPanel {
   }
 
   _commitBuffer() {
-    if (this.tab === 'sim') {
-      const em = this.app.emitters[this.app.selEmitter];
-      if (!em) return false;
-      const v = this.editor.getValue();
-      if (em.p.simSrc !== v) {
-        em.p.simSrc = v;
-        return true;
-      }
-      return false;
-    }
-    const m = this.app.materials.find((x) => x.id === this.materialId);
-    if (!m) return false;
+    const buf = this.buf;
+    if (!buf) return false;
     const v = this.editor.getValue();
-    const key = this.tab === 'vs' ? 'vertexSrc' : 'fragmentSrc';
-    if (m[key] !== v) {
-      m[key] = v;
+    if (v === buf.src) return false; // untouched — nothing of the user's to save
+    buf.src = v;
+    if (buf.tab === 'sim') {
+      const em = this.app.emitters.find((x) => x.p.id === buf.id);
+      if (!em) return false; // emitter is gone (deleted, or a new effect loaded)
+      em.p.simSrc = v;
       return true;
     }
-    return false;
+    const m = this.app.materials.find((x) => x.id === buf.id);
+    if (!m) return false;
+    m[buf.tab === 'vs' ? 'vertexSrc' : 'fragmentSrc'] = v;
+    return true;
   }
 
   commit() {
     clearTimeout(this._debounce);
-    if (this.tab === 'sim') {
-      const em = this.app.emitters[this.app.selEmitter];
-      this._commitBuffer();
+    const buf = this.buf;
+    if (!buf) return;
+    this._commitBuffer();
+    if (buf.tab === 'sim') {
+      const em = this.app.emitters.find((x) => x.p.id === buf.id);
       if (em) this.app.markSim(em);
       return;
     }
-    if (this._commitBuffer()) this.app.markMaterial(this.materialId);
-    else this.app.markMaterial(this.materialId); // force recompile to surface errors
+    this.app.markMaterial(buf.id); // always recompile, so errors resurface
   }
 
   onCompiled(materialId, errors) {
@@ -562,9 +587,7 @@ export class EditorPanel {
   }
 
   onSimCompiled(emitterId, errors) {
-    if (this.tab !== 'sim') return;
-    const em = this.app.emitters[this.app.selEmitter];
-    if (!em || em.p.id !== emitterId) return;
+    if (this.tab !== 'sim' || this.buf?.id !== emitterId) return;
     this._showErrors(errors);
   }
 
