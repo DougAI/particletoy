@@ -1,6 +1,8 @@
 // Curve (Hermite-spline keyframes, tangent per key) and Gradient (color
 // stops) models, plus LUT baking used by the GPU (life-indexed lookup texture).
 
+import { toHalfArray } from './gpu.js';
+
 export const LUT_SIZE = 64;
 
 /** curve: {keys: [{t, v, tanIn?, tanOut?}]} sorted by t. tanIn/tanOut are
@@ -96,32 +98,37 @@ export function sortGradient(grad) {
   grad.stops.sort((a, b) => a.t - b.t);
 }
 
+export const LUT_ROWS = 3;
+
 /**
- * Bakes an emitter's over-lifetime curves into a LUT_SIZE x 2 RGBA float image.
- * Row 0 (v=0.25): rgb = colorOverLife, a = alphaOverLife
- * Row 1 (v=0.75): r = sizeOverLife multiplier, gba unused
+ * Bakes an emitter's over-lifetime curves into a LUT_SIZE x 3 RGBA float image.
+ * Row 0 (v=1/6): rgb = colorOverLife, a = alphaOverLife
+ * Row 1 (v=3/6): r = sizeOverLife multiplier, gba unused
+ * Row 2 (v=5/6): r = speedOverLife multiplier (sampled by the GPU sim), gba unused
  */
 export function bakeEmitterLUT(emitter) {
-  const data = new Float32Array(LUT_SIZE * 2 * 4);
+  const data = new Float32Array(LUT_SIZE * LUT_ROWS * 4);
   for (let i = 0; i < LUT_SIZE; i++) {
     const t = i / (LUT_SIZE - 1);
     const c = evalGradient(emitter.colorOverLife, t);
     const a = evalCurve(emitter.alphaOverLife, t);
     const s = evalCurve(emitter.sizeOverLife, t);
+    const sp = evalCurve(emitter.speedOverLife, t);
     const o0 = i * 4;
     data[o0] = c[0]; data[o0 + 1] = c[1]; data[o0 + 2] = c[2]; data[o0 + 3] = a;
     const o1 = (LUT_SIZE + i) * 4;
     data[o1] = s; data[o1 + 1] = 1; data[o1 + 2] = 1; data[o1 + 3] = 1;
+    const o2 = (LUT_SIZE * 2 + i) * 4;
+    data[o2] = sp; data[o2 + 1] = 1; data[o2 + 2] = 1; data[o2 + 3] = 1;
   }
   return data;
 }
 
-export function uploadLUT(gl, tex, data) {
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, LUT_SIZE, 2, 0, gl.RGBA, gl.FLOAT, data);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.bindTexture(gl.TEXTURE_2D, null);
+export function uploadLUT(device, tex, data) {
+  device.queue.writeTexture(
+    { texture: tex },
+    toHalfArray(data),
+    { bytesPerRow: LUT_SIZE * 8 }, // rgba16float = 8 bytes/texel
+    { width: LUT_SIZE, height: LUT_ROWS },
+  );
 }

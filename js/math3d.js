@@ -1,4 +1,4 @@
-// Minimal 3D math library (column-major mat4, matching WebGL conventions).
+// Minimal 3D math library (column-major mat4; WebGPU 0..1 clip-space depth).
 
 export function v3(x = 0, y = 0, z = 0) { return [x, y, z]; }
 
@@ -40,15 +40,16 @@ export function mat4Multiply(a, b) {
   return out;
 }
 
+// WebGPU clip space: z maps to [0, 1] (not GL's [-1, 1]).
 export function mat4Perspective(fovY, aspect, near, far) {
   const f = 1 / Math.tan(fovY / 2);
   const nf = 1 / (near - far);
   const out = new Float32Array(16);
   out[0] = f / aspect;
   out[5] = f;
-  out[10] = (far + near) * nf;
+  out[10] = far * nf;
   out[11] = -1;
-  out[14] = 2 * far * near * nf;
+  out[14] = far * near * nf;
   return out;
 }
 

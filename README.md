@@ -4,7 +4,7 @@ A [shadertoy](https://shadertoy.com)-inspired playground for **particle effects*
 game-engine-style particle editor with programmable PBR materials, two selectable graphics
 pipelines, and zero-infrastructure sharing.
 
-Built as a fully static web app: plain ES modules, WebGL2, no dependencies, no build step.
+Built as a fully static web app: plain ES modules, WebGPU, no dependencies, no build step.
 
 ## Run it
  
@@ -13,7 +13,7 @@ python serve.py     # → http://localhost:8917
 ```
 
 Any static file server works (see the note about Windows MIME types in
-[setup.html](setup.html)). Requires WebGL2 + `EXT_color_buffer_float` (all current browsers).
+[setup.html](setup.html)). Requires WebGPU (current Chrome / Edge / Safari / Firefox).
 
 ## Features
 
@@ -28,9 +28,25 @@ Any static file server works (see the note about Windows MIME types in
 - Mesh per emitter: camera-facing quad, sphere, cube, or **custom OBJ** (paste into inspector)
 - Per-emitter material selection
 
+**Programmable GPU simulation** (the compute part):
+
+- Each emitter can switch from the property-driven sim to a **WGSL compute shader** you edit
+  live: `spawn()` initializes a particle, `simulate()` steps it — spawning budgets, slot
+  recycling, dead-particle culling (indirect draws) and back-to-front sorting for alpha
+  blending all run on the GPU, scaling to ~100k particles
+- **Convert to sim shader** seeds the editor with the exact WGSL that reproduces the
+  property-editor behavior; every property keeps working through `sp.*` uniforms until you
+  replace it
+- **Custom per-particle fields** (f32/vec2/vec3/vec4) — add state like a `home` anchor or a
+  `phase`, and it persists in the particle struct across frames
+- **`neighbors[]`** — a race-free, read-only snapshot of the whole particle array from last
+  frame, so particles can react to *each other* (flocking, contact forces). See the
+  **Boids (compute)** preset: 600 boids doing separation / alignment / cohesion entirely
+  on the GPU
+
 **Materials & shaders** (the shadertoy part):
 
-- Every material has a **programmable vertex and fragment stage** with live compilation,
+- Every material has a **programmable vertex and fragment stage** (WGSL) with live compilation,
   inline error markers, and shadertoy-style behavior (broken code keeps the last good shader
   running)
 - The fragment stage fills a **PBR `Surface`** (albedo / metallic / roughness / normal /
@@ -38,8 +54,10 @@ Any static file server works (see the note about Windows MIME types in
   (velocity stretching, orbits, …)
 - Blend modes: opaque, alpha-cutout, alpha blend (depth-sorted), additive
 - Lit (PBR) or unlit shading, soft particles (depth fade), double-sided toggle
-- Built-in noise library (`hash11/21/33`, `noise2/3`, `fbm2/3`), shadertoy-style uniforms
-  (`iTime`, `iResolution`, `iMouse`) — press **?** in the app for the full API reference
+- Built-in noise library (`hash11/21/33`, `noise2/3`, `fbm2/3`), frame uniforms
+  (`u.time`, `u.resolution`, `u.mouse`, `u.cameraPos`) — press **?** in the app for the full
+  API reference. Legacy GLSL effects (old links, saves, gallery entries) are auto-converted
+  to WGSL on load
 
 **Two premade PBR pipelines**, switchable live from the toolbar:
 
@@ -58,7 +76,8 @@ tonemapping.
   the URL fragment: a ~2 KB link that needs no server
 - **Save / Library** — browser localStorage
 - **Export / Import** — portable `.particletoy.json` files
-- **Presets** — Campfire, Magic Orb, Fountain, Confetti Burst, Smoke Plume, blank starter
+- **Presets** — Campfire, Magic Orb, Fountain, Confetti Burst, Smoke Plume,
+  Boids (compute), blank starter
 
 **The community site** (accounts + gallery, backed by a free Supabase project):
 
@@ -100,5 +119,7 @@ Site: `index.html` / `browse.html` / `view.html` / `account.html` / `user.html` 
 (auth, particles, likes, comments, notifications, storage); `js/player.js` is the
 embeddable renderer used for the front page, hover previews, and view pages.
 Editor: `editor.html` + `js/main.js`, with `js/renderer.js` (both pipelines),
-`js/shaderlib.js` (GLSL + material API wrappers), `js/particles.js` (simulation),
-`js/ui.js` (inspector + editor panel).
+`js/gpu.js` (WebGPU device + uniform-block/layout helpers), `js/shaderlib.js` (WGSL +
+material API wrappers), `js/particles.js` (CPU simulation), `js/simlib.js` +
+`js/gpusim.js` (compute simulation: codegen, runtime, bitonic sort),
+`js/glsl2wgsl.js` (legacy shader migration), `js/ui.js` (inspector + editor panel).

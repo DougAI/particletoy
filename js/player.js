@@ -1,12 +1,17 @@
 // Embeddable effect player — a lightweight, editor-free wrapper around the
 // renderer. Used by the front page (particle of the day), card hover
 // previews, and the view page.
+//
+// WebGPU device creation is async, but the public API stays synchronous:
+// `ok` is a fast navigator.gpu presence check, and load()/start() calls made
+// before the device is ready are queued and replayed once it is.
 
-import { createGL } from './glutil.js';
+import { createGPU } from './gpu.js';
 import { Renderer, defaultScene } from './renderer.js';
 import { OrbitCamera } from './camera.js';
 import { Emitter, defaultEmitterParams } from './particles.js';
 import { makeMaterial, MaterialRuntime } from './materials.js';
+import { migrateMaterial } from './glsl2wgsl.js';
 
 function mergeEmitterParams(p) {
   const d = defaultEmitterParams();
@@ -31,29 +36,49 @@ export class EffectPlayer {
     this.emitters = [];
     this.runtimes = new Map();
     this.scene = defaultScene();
-    this.error = null;
+    this.device = null;
+    this._pendingData = null;
+    this._wantPlay = false;
+    this._loading = Promise.resolve();
 
-    const { gl, error } = createGL(canvas);
-    if (!gl) { this.error = error; return; }
-    this.gl = gl;
-    this.renderer = new Renderer(gl, canvas);
-    this.camera = new OrbitCamera(canvas);
-    if (!interactive) canvas.style.pointerEvents = 'none';
+    this.error = navigator.gpu ? null : 'WebGPU is not supported by this browser.';
+    this.ready = this.error ? Promise.resolve(false) : this._setup(interactive);
   }
 
-  get ok() { return Boolean(this.gl); }
+  get ok() { return !this.error; }
+
+  async _setup(interactive) {
+    const { device, context, format, error } = await createGPU(this.canvas);
+    if (!device) {
+      this.error = error;
+      return false;
+    }
+    this.device = device;
+    this.renderer = new Renderer({ device, context, format, canvas: this.canvas });
+    this.camera = new OrbitCamera(this.canvas);
+    if (!interactive) this.canvas.style.pointerEvents = 'none';
+    if (this._pendingData) this._load(this._pendingData);
+    if (this._wantPlay) this._startLoop();
+    return true;
+  }
 
   load(data) {
-    if (!this.gl) return;
+    this._pendingData = data;
+    if (this.device) this._load(data);
+  }
+
+  _load(data) {
     this._clear();
-    const materials = (data.materials || []).map((m) => ({ ...makeMaterial({}), ...m }));
+    const materials = (data.materials || []).map((m) => migrateMaterial({ ...makeMaterial({}), ...m }));
     if (!materials.length) materials.push(makeMaterial({ name: 'Default' }));
+    const compiles = [];
     for (const m of materials) {
-      const rt = new MaterialRuntime(this.gl, m);
+      const rt = new MaterialRuntime(this.renderer, m);
       rt.material = m;
-      rt.compile(['gbuffer', 'forward']);   // errors tolerated: bad stages keep defaults
+      compiles.push(rt.compile(['gbuffer', 'forward'])); // errors tolerated: bad stages keep defaults
       this.runtimes.set(m.id, rt);
     }
+    this._loading = Promise.all(compiles);
     this.emitters = (data.emitters || [])
       .map((p) => new Emitter(mergeEmitterParams(structuredClone(p))));
     this.scene = { ...defaultScene(), ...(data.scene ? structuredClone(data.scene) : {}) };
@@ -62,7 +87,12 @@ export class EffectPlayer {
   }
 
   start() {
-    if (!this.gl || this.playing) return;
+    this._wantPlay = true;
+    if (this.device) this._startLoop();
+  }
+
+  _startLoop() {
+    if (this.playing) return;
     this.playing = true;
     this._last = performance.now();
     const tick = (now) => {
@@ -74,13 +104,13 @@ export class EffectPlayer {
   }
 
   stop() {
+    this._wantPlay = false;
     this.playing = false;
     cancelAnimationFrame(this.raf);
   }
 
   frame(now) {
-    const gl = this.gl;
-    if (!gl) return;
+    if (!this.device) return;
     const dt = Math.min(0.05, Math.max(0, (now - this._last) / 1000));
     this._last = now;
 
@@ -108,24 +138,23 @@ export class EffectPlayer {
     });
   }
 
-  /** Renders a frame right now and returns a JPEG blob (same-task capture —
-   *  the default GL context does not preserve its drawing buffer). */
-  captureJPEG(w = 640, h = 360, quality = 0.85) {
-    return new Promise((resolve) => {
-      if (!this.gl) return resolve(null);
-      this._last = performance.now() - 16;
-      this.frame(performance.now());
-      const out = document.createElement('canvas');
-      out.width = w;
-      out.height = h;
-      const ctx = out.getContext('2d');
-      drawCover(ctx, this.canvas, w, h);
-      out.toBlob((b) => resolve(b), 'image/jpeg', quality);
-    });
+  /** Renders a frame right now and returns a JPEG blob. Waits for the device
+   *  and material pipelines so the first capture isn't black. */
+  async captureJPEG(w = 640, h = 360, quality = 0.85) {
+    if (!(await this.ready)) return null;
+    await this._loading;
+    this._last = performance.now() - 16;
+    this.frame(performance.now());
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    const ctx = out.getContext('2d');
+    drawCover(ctx, this.canvas, w, h);
+    return new Promise((resolve) => out.toBlob((b) => resolve(b), 'image/jpeg', quality));
   }
 
   _clear() {
-    for (const em of this.emitters) em.dispose(this.gl);
+    for (const em of this.emitters) em.dispose();
     this.emitters = [];
     for (const rt of this.runtimes.values()) rt.dispose();
     this.runtimes.clear();
@@ -133,11 +162,11 @@ export class EffectPlayer {
 
   dispose() {
     this.stop();
-    if (!this.gl) return;
+    if (!this.device) return;
     this._clear();
     this.renderer.dispose?.();
-    this.gl.getExtension('WEBGL_lose_context')?.loseContext();
-    this.gl = null;
+    this.device.destroy();
+    this.device = null;
   }
 }
 
