@@ -7,7 +7,8 @@ import { Emitter, defaultEmitterParams } from './particles.js';
 import { makeMaterial, MaterialRuntime, serializeMaterial } from './materials.js';
 import { migrateMaterial } from './glsl2wgsl.js';
 import { PRESETS } from './presets.js';
-import { buildInspector, EditorPanel, modal, toast, showHelp } from './ui.js';
+import { buildInspector, EditorPanel, modal, toast, showHelp, setHistoryRecorder } from './ui.js';
+import { History } from './history.js';
 import {
   serializeState, encodeShareString, decodeShareString,
   loadLibrary, saveToLibrary, deleteFromLibrary, downloadJSON, downloadBlob, pickJSONFile,
@@ -161,6 +162,35 @@ function applyData(obj) {
 function currentData() {
   return serializeState(app.name, app.emitters, app.materials.map(serializeMaterial), app.scene);
 }
+
+// ---------------------------------------------------------------- undo/redo
+// Whole-state snapshots round-tripped through the same applyData() used for
+// presets/share links — the one path already trusted to fully replace the
+// live effect. setHistoryRecorder() wires ui.js's widget factories (sliders,
+// spinner arrows, checkboxes, buttons, and — via the curve/gradient editors'
+// shared `lut` callback — curve points) to record into it.
+const history = new History({
+  getState: () => JSON.stringify(currentData()),
+  setState: (snap) => applyData(JSON.parse(snap)),
+});
+setHistoryRecorder(() => history.record());
+window.__particletoy.history = history;
+
+window.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const key = e.key.toLowerCase();
+  if (key !== 'z' && key !== 'y') return;
+  const t = document.activeElement;
+  // Text-editable fields keep their native undo (Ctrl+Z mid-typing should
+  // revert characters, not jump the whole effect back a step).
+  const textEditing = t && (t.tagName === 'TEXTAREA'
+    || (t.tagName === 'INPUT' && ['text', 'number', 'email', 'search', 'tel', 'url', 'password'].includes(t.type)));
+  if (textEditing) return;
+  e.preventDefault();
+  const redo = key === 'y' || e.shiftKey;
+  const did = redo ? history.redo() : history.undo();
+  if (did) toast(redo ? 'Redo' : 'Undo');
+});
 
 function restart() {
   app.time = 0;

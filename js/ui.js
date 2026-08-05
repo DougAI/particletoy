@@ -8,6 +8,15 @@ import { makeMaterial } from './materials.js';
 import { PROPS_SIM_SRC, FIELD_TYPES } from './simlib.js';
 
 // ---------------------------------------------------------------- primitives
+
+// Hook the widgets below into the undo/redo history (wired once by main.js).
+// Every control that mutates app state funnels through one of these
+// factories, so recording here — rather than at each of their call sites —
+// covers sliders, spinner arrows, checkboxes, dropdowns, colors and buttons
+// (and, via the shared `lut` callback, the curve/gradient editors) in one place.
+let recordChange = () => {};
+export function setHistoryRecorder(fn) { recordChange = fn; }
+
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -39,6 +48,7 @@ function numIn(v, onCh, { step = 0.1, min, max, w } = {}) {
     if (min !== undefined) x = Math.max(min, x);
     if (max !== undefined) x = Math.min(max, x);
     i.value = x;
+    recordChange();
     onCh(x);
   });
   return i;
@@ -50,7 +60,7 @@ function slider(v, onCh, { min = 0, max = 1, step = 0.01 } = {}) {
   s.type = 'range';
   s.min = min; s.max = max; s.step = step; s.value = v;
   const n = numIn(v, (x) => { s.value = x; onCh(x); }, { step, min, max, w: 52 });
-  s.addEventListener('input', () => { n.value = s.value; onCh(parseFloat(s.value)); });
+  s.addEventListener('input', () => { n.value = s.value; recordChange(); onCh(parseFloat(s.value)); });
   wrap.append(s, n);
   return wrap;
 }
@@ -75,7 +85,7 @@ function check(v, onCh) {
   const i = el('input');
   i.type = 'checkbox';
   i.checked = !!v;
-  i.addEventListener('change', () => onCh(i.checked));
+  i.addEventListener('change', () => { recordChange(); onCh(i.checked); });
   return i;
 }
 
@@ -87,7 +97,7 @@ function selectIn(options, v, onCh) {
     s.appendChild(o);
   }
   s.value = v;
-  s.addEventListener('change', () => onCh(s.value));
+  s.addEventListener('change', () => { recordChange(); onCh(s.value); });
   return s;
 }
 
@@ -98,6 +108,7 @@ function colorIn(arr, onCh) {
   i.addEventListener('input', () => {
     const c = hexToLin(i.value);
     arr[0] = c[0]; arr[1] = c[1]; arr[2] = c[2];
+    recordChange();
     onCh();
   });
   return i;
@@ -113,7 +124,9 @@ function colorRGBAIn(arr, onCh) {
 function btn(label, onClick, cls = 'btn') {
   const b = el('button', cls, label);
   b.type = 'button';
-  b.addEventListener('click', onClick);
+  // Recorded unconditionally — History.flush() drops the entry if the click
+  // (e.g. closing a modal) turned out not to change app state.
+  b.addEventListener('click', () => { recordChange(); onClick(); });
   return b;
 }
 
@@ -204,14 +217,16 @@ export function buildInspector(app) {
 
 function buildEmitterSections(root, app, em) {
   const p = em.p;
-  const lut = () => app.markLut(em);
+  // Also the onChange for CurveEditor/GradientEditor (below) — routing their
+  // drag/add/delete mutations through the same recorder as everything else.
+  const lut = () => { recordChange(); app.markLut(em); };
 
   // ---- general
   const g = section(root, `Emitter — ${p.name}`);
   {
     const nameIn = el('input', 'text-in');
     nameIn.value = p.name;
-    nameIn.addEventListener('change', () => { p.name = nameIn.value || 'Emitter'; buildInspector(app); });
+    nameIn.addEventListener('change', () => { recordChange(); p.name = nameIn.value || 'Emitter'; buildInspector(app); });
     g.appendChild(row('Name', nameIn));
     g.appendChild(row('Position', vec3In(p.position, () => {})));
     g.appendChild(row('Duration (s)', numIn(p.duration, (x) => { p.duration = Math.max(0.05, x); }, { min: 0.05, step: 0.5 })));
@@ -249,6 +264,7 @@ function buildEmitterSections(root, app, em) {
         nameIn.style.width = '110px';
         nameIn.value = f.name;
         nameIn.addEventListener('change', () => {
+          recordChange();
           const clean = nameIn.value.replace(/\W/g, '').replace(/^\d+/, '');
           if (clean) f.name = clean;
           app.markSim(em);
@@ -392,7 +408,7 @@ function buildMaterialSections(root, app) {
 
     const nameIn = el('input', 'text-in');
     nameIn.value = m.name;
-    nameIn.addEventListener('change', () => { m.name = nameIn.value || 'Material'; app.refreshUI(); });
+    nameIn.addEventListener('change', () => { recordChange(); m.name = nameIn.value || 'Material'; app.refreshUI(); });
     box.appendChild(row('Name', nameIn));
     box.appendChild(row('Blend', selectIn(
       [['opaque', 'Opaque'], ['cutout', 'Cutout'], ['blend', 'Alpha Blend'], ['add', 'Additive']],
