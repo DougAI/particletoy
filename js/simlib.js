@@ -18,6 +18,7 @@
 
 import { defineBlock } from './gpu.js';
 import { NOISE_WGSL } from './shaderlib.js';
+import { LUT_ROW, lutRowV, LUT_SAMPLE_WGSL } from './curves.js';
 
 export const WORKGROUP_SIZE = 64;
 
@@ -77,7 +78,7 @@ const SIM_PRELUDE_HEAD = `${defineBlock(SIM_FIELDS).wgslStruct('SimParams')}
 @group(0) @binding(0) var<uniform> sp: SimParams;
 @group(0) @binding(4) var ptSamp: sampler;
 @group(0) @binding(5) var ptLut: texture_2d<f32>;
-`;
+${LUT_SAMPLE_WGSL}`;
 
 const SIM_CTX_WGSL = `
 // Read-only snapshot of every particle as of the end of last frame. Reading
@@ -116,9 +117,26 @@ fn randUnitVec() -> vec3f {
   return vec3f(r * cos(a), z, r * sin(a));
 }
 
-// Over-lifetime curves baked by the editor (row 2 of the emitter LUT).
+// The emitter's over-lifetime curves, baked by the editor into one small LUT
+// texture that the sim and the renderer share.
+//
+// Only Speed/life is the sim's job to apply — see simulate() below. Size/life,
+// Color/life and Alpha/life are applied to the instance data at draw time (for
+// both sim modes), so p.size and p.color stay the values spawn() gave them and
+// multiplying a curve in here would apply it twice. They're readable anyway:
+// a sim that needs the size a particle is actually drawn at (collisions,
+// spacing, spawning children) wants base size * curveSize(life01).
 fn curveSpeed(life01: f32) -> f32 {
-  return textureSampleLevel(ptLut, ptSamp, vec2f(life01, 0.833333), 0.0).r;
+  return textureSampleLevel(ptLut, ptSamp, vec2f(ptLutU(life01), ${lutRowV(LUT_ROW.speed)}), 0.0).r;
+}
+fn curveSize(life01: f32) -> f32 {
+  return textureSampleLevel(ptLut, ptSamp, vec2f(ptLutU(life01), ${lutRowV(LUT_ROW.size)}), 0.0).r;
+}
+fn curveColor(life01: f32) -> vec3f {
+  return textureSampleLevel(ptLut, ptSamp, vec2f(ptLutU(life01), ${lutRowV(LUT_ROW.color)}), 0.0).rgb;
+}
+fn curveAlpha(life01: f32) -> f32 {
+  return textureSampleLevel(ptLut, ptSamp, vec2f(ptLutU(life01), ${lutRowV(LUT_ROW.color)}), 0.0).a;
 }
 `;
 
@@ -216,6 +234,15 @@ export function buildSimWGSL(userCode, userFields) {
 export const PROPS_SIM_SRC = `// Default particle behavior — everything the property editor drives.
 // spawn() runs once per new particle; simulate() runs every frame.
 // sp.* mirrors the emitter properties (see Help ? for the full list).
+//
+// What this shader owns, and what it doesn't:
+//   Lifetime, Start size/rot/color, the emission shape, gravity, drag and the
+//   Speed/life curve are all applied below — they only affect particles
+//   through this code now, so deleting a line really does remove the feature.
+//   Size/life, Color/life and Alpha/life are applied later, when the particle
+//   is drawn: p.size and p.color are the values at birth, and the curves scale
+//   them per frame. Read them with curveSize()/curveColor()/curveAlpha() if
+//   you need them here, but don't multiply them in — that would apply twice.
 
 fn spawn(p: ptr<function, Particle>, ctx: SpawnCtx) {
   // --- emission shape -> local position + direction
@@ -251,8 +278,8 @@ fn spawn(p: ptr<function, Particle>, ctx: SpawnCtx) {
 
   p.position = pos + sp.emitterPos;
   p.velocity = dir * randRange(sp.speedRange.x, sp.speedRange.y);
-  p.lifetime = randRange(sp.lifetimeRange.x, sp.lifetimeRange.y);
-  p.size = randRange(sp.sizeRange.x, sp.sizeRange.y);
+  p.lifetime = randRange(sp.lifetimeRange.x, sp.lifetimeRange.y);  // Lifetime (s)
+  p.size = randRange(sp.sizeRange.x, sp.sizeRange.y);              // Start size
   p.rotation = randRange(sp.rotationRange.x, sp.rotationRange.y);
   p.rotVel = randRange(sp.rotSpeedRange.x, sp.rotSpeedRange.y);
   p.color = mix(sp.colorA, sp.colorB, rand());
@@ -261,7 +288,7 @@ fn spawn(p: ptr<function, Particle>, ctx: SpawnCtx) {
 fn simulate(p: ptr<function, Particle>, ctx: SimCtx) {
   let dragK = max(0.0, 1.0 - sp.drag * ctx.dt);
   p.velocity = (p.velocity + sp.gravity * ctx.dt) * dragK;
-  let speedMul = curveSpeed(p.age / p.lifetime);
+  let speedMul = curveSpeed(p.age / p.lifetime);   // Speed/life curve
   p.position += p.velocity * speedMul * ctx.dt;
   p.rotation += p.rotVel * ctx.dt;
 }

@@ -100,11 +100,28 @@ export function sortGradient(grad) {
 
 export const LUT_ROWS = 3;
 
+/** Which row of the LUT holds which curve, plus the v coordinate that lands
+ *  exactly on that row's texel centers. The vertex shader (size/color/alpha)
+ *  and the compute sim (speed) both sample through these, so the row layout is
+ *  defined once here instead of as magic numbers in two WGSL sources. */
+export const LUT_ROW = { color: 0, size: 1, speed: 2 };
+export const lutRowV = (row) => (row + 0.5) / LUT_ROWS;
+
+/** Shared WGSL: maps a particle's 0..1 life to the u that reads the texel
+ *  baked for that t. Texel i holds t = i/(LUT_SIZE-1), so life01 has to land on
+ *  texel centers — passing it as u straight would shift every lookup half a
+ *  texel and make a curve read slightly early. */
+export const LUT_SAMPLE_WGSL = `
+fn ptLutU(life01: f32) -> f32 {
+  return (0.5 + saturate(life01) * ${LUT_SIZE - 1}.0) / ${LUT_SIZE}.0;
+}
+`;
+
 /**
- * Bakes an emitter's over-lifetime curves into a LUT_SIZE x 3 RGBA float image.
- * Row 0 (v=1/6): rgb = colorOverLife, a = alphaOverLife
- * Row 1 (v=3/6): r = sizeOverLife multiplier, gba unused
- * Row 2 (v=5/6): r = speedOverLife multiplier (sampled by the GPU sim), gba unused
+ * Bakes an emitter's over-lifetime curves into a LUT_SIZE x LUT_ROWS RGBA image.
+ * Row color: rgb = colorOverLife, a = alphaOverLife
+ * Row size:  r = sizeOverLife multiplier, gba unused
+ * Row speed: r = speedOverLife multiplier (sampled by the GPU sim), gba unused
  */
 export function bakeEmitterLUT(emitter) {
   const data = new Float32Array(LUT_SIZE * LUT_ROWS * 4);
