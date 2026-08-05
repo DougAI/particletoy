@@ -104,7 +104,10 @@ export class ParticleSorter {
       for (let j = k >> 1; j > 0; j >>= 1) kj.push([k, j]);
     }
     const STRIDE = 256; // minUniformBufferOffsetAlignment
-    const data = new Uint32Array((STRIDE / 4) * kj.length);
+    // Always allocate at least one stride: a size-1 buffer has an empty
+    // schedule, and a zero-length uniform buffer can't satisfy the bind
+    // group's minBindingSize (it would invalidate the whole frame).
+    const data = new Uint32Array((STRIDE / 4) * Math.max(1, kj.length));
     kj.forEach(([k, j], i) => {
       data[(STRIDE / 4) * i] = k;
       data[(STRIDE / 4) * i + 1] = j;
@@ -352,6 +355,10 @@ export class SimRuntime {
    *  after dispatch). Draw from sortedBuf afterwards. */
   encodeSort(cpass, camPos, viewDir) {
     if (!this.pipeUpdate) return false;
+    // Nothing to order below two slots, and the bitonic schedule is empty at
+    // that size — skip rather than encode a degenerate pass. Draw then falls
+    // back to instanceBuf, which is trivially in order at one particle.
+    if (this.n2 < 2) return false;
     const sorter = this.renderer.sorter;
     this.sortUB.set('camPos', camPos).set('n', this.n2).set('viewDir', viewDir).upload();
     const sched = sorter.schedule(this.n2);
