@@ -76,13 +76,16 @@ export function deleteFromLibrary(name) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(lib));
 }
 
-export function downloadJSON(obj, filename) {
-  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+export function downloadBlob(blob, filename) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+export function downloadJSON(obj, filename) {
+  downloadBlob(new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' }), filename);
 }
 
 export function pickJSONFile() {
