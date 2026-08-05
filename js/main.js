@@ -49,6 +49,11 @@ const app = {
   },
   markSim(em) { em.simDirty = true; },
   openSimInEditor() { editorPanel.show(editorPanel.materialId, 'sim'); },
+  selectEmitter(i) {
+    app.selEmitter = i;
+    buildInspector(app);
+    editorPanel.onEmitterChanged();
+  },
   addEmitter(p) {
     app.emitters.push(new Emitter(p));
     app.selEmitter = app.emitters.length - 1;
@@ -130,10 +135,15 @@ function mergeEmitterParams(p) {
 }
 
 function applyData(obj) {
+  // Whatever is on screen in the editor belongs to the effect being replaced —
+  // drop it before the swap so it can't be flushed into the incoming one (e.g.
+  // a half-edited sim shader landing on a preset's compute emitter).
+  editorPanel.discardBuffer();
   for (const em of app.emitters) em.dispose();
   for (const rt of app.materialRuntimes.values()) rt.dispose();
   app.materialRuntimes.clear();
   app.materialErrors.clear();
+  app.simErrors.clear();
 
   app.name = obj.name || 'Untitled';
   app.materials = (obj.materials || []).map((m) => migrateMaterial({ ...makeMaterial({}), ...m }));
