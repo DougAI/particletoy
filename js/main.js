@@ -10,10 +10,11 @@ import { PRESETS } from './presets.js';
 import { buildInspector, EditorPanel, modal, toast, showHelp } from './ui.js';
 import {
   serializeState, encodeShareString, decodeShareString,
-  loadLibrary, saveToLibrary, deleteFromLibrary, downloadJSON, pickJSONFile,
+  loadLibrary, saveToLibrary, deleteFromLibrary, downloadJSON, downloadBlob, pickJSONFile,
 } from './share.js';
 import * as api from './backend.js';
 import { captureCanvasJPEG } from './player.js';
+import { exportVideo, exportGif, getVideoMimeType, MAX_EXPORT_SECONDS } from './exportmedia.js';
 
 const canvas = document.getElementById('gl');
 const { device, context, format, error: gpuError } = await createGPU(canvas);
@@ -277,6 +278,7 @@ function wireToolbar() {
   document.getElementById('btn-export').addEventListener('click', () => {
     downloadJSON(currentData(), `${(app.name || 'effect').replace(/[^\w-]+/g, '_')}.particletoy.json`);
   });
+  document.getElementById('btn-export-media').addEventListener('click', showExportMedia);
   document.getElementById('btn-import').addEventListener('click', async () => {
     const obj = await pickJSONFile();
     if (obj && obj.emitters && obj.materials) {
@@ -458,6 +460,126 @@ async function showPublish() {
       err.textContent = ex.message;
     } finally {
       go.disabled = false;
+    }
+  });
+}
+
+// ---------------------------------------------------------------- export media (video/GIF)
+function showExportMedia() {
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="prop-row"><label class="prop-label">Format</label>
+      <div class="seg" id="xm-format">
+        <button type="button" class="seg-btn active" data-fmt="video">Video</button>
+        <button type="button" class="seg-btn" data-fmt="gif">GIF</button>
+      </div></div>
+    <div class="prop-row"><label class="prop-label">Size</label>
+      <select id="xm-size" class="select-in">
+        <option value="1080x1080">Square · 1080×1080 (Instagram/TikTok)</option>
+        <option value="1080x1920">Vertical · 1080×1920 (Stories/Reels)</option>
+        <option value="1920x1080">Landscape · 1920×1080</option>
+        <option value="720x720">Square · 720×720 (faster)</option>
+      </select></div>
+    <div class="prop-row"><label class="prop-label">Duration (s)</label>
+      <input id="xm-seconds" class="num-in" type="number" min="1" max="${MAX_EXPORT_SECONDS}" step="0.5" value="4"></div>
+    <div class="prop-row"><label class="prop-label">Frame rate</label>
+      <select id="xm-fps" class="select-in"></select></div>
+    <p class="muted">Uses the current camera angle and the ${app.pipeline === 'deferred' ? 'PBR · Deferred' : 'PBR · Forward'} pipeline. Renders in the background — the viewport keeps playing.</p>
+    <div id="xm-progress-wrap" class="xm-progress-wrap hidden">
+      <div class="xm-progress-bar"><div id="xm-progress-fill" class="xm-progress-fill"></div></div>
+      <span id="xm-progress-text" class="muted"></span>
+    </div>
+    <p id="xm-err" class="muted" style="color:var(--danger);min-height:16px"></p>
+    <div class="btn-row">
+      <button id="xm-go" class="btn btn-accent">Start Export</button>
+      <button id="xm-cancel" class="btn hidden">Cancel</button>
+    </div>
+    <div id="xm-result"></div>`;
+  const { overlay } = modal('Export Video / GIF', div);
+
+  const fpsSel = div.querySelector('#xm-fps');
+  const fmtBtns = [...div.querySelectorAll('#xm-format .seg-btn')];
+  let format = 'video';
+  const setFps = () => {
+    const opts = format === 'gif'
+      ? [['10', '10 fps'], ['15', '15 fps'], ['20', '20 fps']]
+      : [['24', '24 fps'], ['30', '30 fps'], ['60', '60 fps']];
+    fpsSel.innerHTML = '';
+    for (const [v, label] of opts) {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = label;
+      fpsSel.appendChild(o);
+    }
+    fpsSel.value = format === 'gif' ? '15' : '30';
+  };
+  setFps();
+  fmtBtns.forEach((b) => b.addEventListener('click', () => {
+    format = b.dataset.fmt;
+    fmtBtns.forEach((x) => x.classList.toggle('active', x === b));
+    setFps();
+  }));
+
+  const signal = { cancelled: false };
+  overlay.addEventListener('pointerdown', (e) => { if (e.target === overlay) signal.cancelled = true; });
+
+  div.querySelector('#xm-go').addEventListener('click', async () => {
+    const err = div.querySelector('#xm-err');
+    const go = div.querySelector('#xm-go');
+    const cancelBtn = div.querySelector('#xm-cancel');
+    const progWrap = div.querySelector('#xm-progress-wrap');
+    const progFill = div.querySelector('#xm-progress-fill');
+    const progText = div.querySelector('#xm-progress-text');
+    err.textContent = '';
+    div.querySelector('#xm-result').innerHTML = '';
+    signal.cancelled = false;
+
+    if (format === 'video' && !getVideoMimeType()) {
+      err.textContent = 'Video recording is not supported in this browser — try GIF instead.';
+      return;
+    }
+
+    const [w, h] = div.querySelector('#xm-size').value.split('x').map(Number);
+    const seconds = Math.max(1, Math.min(MAX_EXPORT_SECONDS, parseFloat(div.querySelector('#xm-seconds').value) || 4));
+    const fps = parseInt(fpsSel.value, 10);
+
+    go.disabled = true;
+    go.classList.add('hidden');
+    cancelBtn.classList.remove('hidden');
+    progWrap.classList.remove('hidden');
+    progFill.style.width = '0%';
+    progText.textContent = 'Rendering… 0%';
+
+    const onProgress = (p) => {
+      progFill.style.width = `${Math.round(Math.min(1, p) * 100)}%`;
+      progText.textContent = p >= 1 ? 'Encoding…' : `Rendering… ${Math.round(p * 100)}%`;
+    };
+    cancelBtn.addEventListener('click', () => { signal.cancelled = true; }, { once: true });
+
+    try {
+      const result = await (format === 'video' ? exportVideo : exportGif)({
+        data: currentData(), camera, w, h, fps, seconds, pipeline: app.pipeline, onProgress, signal,
+      });
+      if (!result) {
+        toast('Export cancelled');
+      } else {
+        const filename = `${(app.name || 'effect').replace(/[^\w-]+/g, '_')}.${result.ext}`;
+        downloadBlob(result.blob, filename);
+        const url = URL.createObjectURL(result.blob);
+        const preview = result.ext === 'gif'
+          ? `<img src="${url}" style="max-width:100%;border-radius:8px">`
+          : `<video src="${url}" controls autoplay loop muted style="max-width:100%;border-radius:8px"></video>`;
+        div.querySelector('#xm-result').innerHTML =
+          `<p>✔ Exported (${(result.blob.size / 1024 / 1024).toFixed(1)} MB) — downloaded as ${filename}</p>${preview}`;
+        toast('Export ready');
+      }
+    } catch (ex) {
+      err.textContent = ex.message;
+    } finally {
+      go.disabled = false;
+      go.classList.remove('hidden');
+      cancelBtn.classList.add('hidden');
+      progWrap.classList.add('hidden');
     }
   });
 }
