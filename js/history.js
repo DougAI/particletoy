@@ -10,11 +10,21 @@
 
 const COALESCE_MS = 500;
 
+// A snapshot is a whole serialized effect, and every one of them carries a
+// full copy of each material's WGSL. The built-in presets measure 2–7 KB, so
+// the entry limit alone costs ~1.3 MB of string — not worth worrying about.
+// An effect with large hand-written shaders can be an order of magnitude
+// bigger, though, so cap total retained characters as well and drop the
+// oldest entries once it is exceeded. In normal use this never binds.
+const DEFAULT_LIMIT = 200;
+const DEFAULT_MAX_CHARS = 8 * 1024 * 1024;
+
 export class History {
-  constructor({ getState, setState, limit = 200 } = {}) {
+  constructor({ getState, setState, limit = DEFAULT_LIMIT, maxChars = DEFAULT_MAX_CHARS } = {}) {
     this.getState = getState;
     this.setState = setState;
     this.limit = limit;
+    this.maxChars = maxChars;
     this.past = [];
     this.future = [];
     this.pendingBefore = null;
@@ -51,7 +61,21 @@ export class History {
     // of a button that turned out to be state-neutral.
     this.future = [];
     this.past.push(before);
-    if (this.past.length > this.limit) this.past.shift();
+    this.trim();
+  }
+
+  /**
+   * Enforce the entry and character budgets, dropping oldest-first. Runs once
+   * per committed undo step rather than per input event, so walking both
+   * stacks to total their sizes is cheap. The newest entry is always kept —
+   * a single oversized effect should shorten history, not disable undo.
+   */
+  trim() {
+    while (this.past.length > this.limit) this.past.shift();
+    let total = 0;
+    for (const s of this.past) total += s.length;
+    for (const s of this.future) total += s.length;
+    while (this.past.length > 1 && total > this.maxChars) total -= this.past.shift().length;
   }
 
   undo() {
