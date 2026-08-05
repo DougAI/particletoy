@@ -3,8 +3,9 @@
 
 import { CurveEditor, GradientEditor, linToHex, hexToLin } from './widgets.js';
 import { CodeEditor } from './editor.js';
-import { defaultEmitterParams } from './particles.js';
+import { defaultEmitterParams, MAX_CAPACITY } from './particles.js';
 import { makeMaterial } from './materials.js';
+import { PROPS_SIM_SRC, FIELD_TYPES } from './simlib.js';
 
 // ---------------------------------------------------------------- primitives
 function el(tag, cls, text) {
@@ -217,11 +218,75 @@ function buildEmitterSections(root, app, em) {
     g.appendChild(row('Looping', check(p.looping, (v) => { p.looping = v; })));
   }
 
+  // ---- simulation
+  const sim = section(root, 'Simulation');
+  {
+    sim.appendChild(row('Mode', selectIn(
+      [['props', 'Properties (CPU)'], ['shader', 'Compute shader (GPU)']],
+      p.simMode, (v) => {
+        p.simMode = v;
+        if (v === 'shader' && !p.simSrc.trim()) p.simSrc = PROPS_SIM_SRC;
+        app.markSim(em);
+        buildInspector(app);
+      },
+    )));
+    if (p.simMode === 'props') {
+      const cv = btn('Convert to sim shader ▸', () => {
+        if (!p.simSrc.trim()) p.simSrc = PROPS_SIM_SRC;
+        p.simMode = 'shader';
+        app.markSim(em);
+        buildInspector(app);
+        app.openSimInEditor?.();
+      });
+      cv.title = 'Switch this emitter to a GPU compute simulation you can edit — starts from the exact behavior the properties produce';
+      sim.appendChild(cv);
+    } else {
+      sim.appendChild(btn('Edit sim shader ▸', () => app.openSimInEditor?.(), 'btn btn-small'));
+      const fl = el('div', 'burst-list');
+      p.fields.forEach((f, fi) => {
+        const r = el('div', 'burst-row');
+        const nameIn = el('input', 'text-in');
+        nameIn.style.width = '110px';
+        nameIn.value = f.name;
+        nameIn.addEventListener('change', () => {
+          const clean = nameIn.value.replace(/\W/g, '').replace(/^\d+/, '');
+          if (clean) f.name = clean;
+          app.markSim(em);
+          buildInspector(app);
+        });
+        r.appendChild(nameIn);
+        r.appendChild(selectIn(FIELD_TYPES.map((t) => [t, t]), f.type, (v) => {
+          f.type = v;
+          app.markSim(em);
+        }));
+        r.appendChild(btn('✕', () => {
+          p.fields.splice(fi, 1);
+          app.markSim(em);
+          buildInspector(app);
+        }, 'btn btn-icon'));
+        fl.appendChild(r);
+      });
+      sim.appendChild(row('Fields', fl));
+      sim.appendChild(btn('+ Add field', () => {
+        p.fields.push({ name: `field${p.fields.length + 1}`, type: 'f32' });
+        app.markSim(em);
+        buildInspector(app);
+      }));
+      const note = el('p', null,
+        'Custom fields become members of the sim\'s Particle struct. The sections below still feed sp.* uniforms — the default sim uses them; a custom sim may ignore them.');
+      note.className = 'muted';
+      note.style.fontSize = '11px';
+      sim.appendChild(note);
+    }
+  }
+
   // ---- spawn
   const sp = section(root, 'Spawn');
   {
     sp.appendChild(row('Rate (/s)', numIn(p.spawn.rate, (x) => { p.spawn.rate = Math.max(0, x); }, { min: 0, step: 1 })));
-    sp.appendChild(row('Max particles', numIn(p.spawn.max, (x) => { p.spawn.max = Math.max(1, Math.round(x)); }, { min: 1, step: 50 })));
+    sp.appendChild(row('Max particles', numIn(p.spawn.max, (x) => {
+      p.spawn.max = Math.max(1, Math.round(x));
+    }, { min: 1, max: MAX_CAPACITY, step: 50 })));
     const bl = el('div', 'burst-list');
     p.spawn.bursts.forEach((b, bi) => {
       const r = el('div', 'burst-row');
@@ -399,7 +464,9 @@ export class EditorPanel {
 
     this.tabVS = btn('Vertex', () => this.show(this.materialId, 'vs'), 'btn tab-btn');
     this.tabFS = btn('Fragment', () => this.show(this.materialId, 'fs'), 'btn tab-btn');
-    t.append(this.tabVS, this.tabFS);
+    this.tabSim = btn('Sim', () => this.show(this.materialId, 'sim'), 'btn tab-btn');
+    this.tabSim.title = 'Compute simulation of the selected emitter';
+    t.append(this.tabVS, this.tabFS, this.tabSim);
 
     const spacer = el('div', 'flex-spacer');
     t.appendChild(spacer);
@@ -426,10 +493,23 @@ export class EditorPanel {
     this.tab = tab;
     const m = this.app.materials.find((x) => x.id === materialId);
     this.matSelect.value = materialId ?? '';
+    this.matSelect.disabled = tab === 'sim';
     this.tabVS.classList.toggle('active', tab === 'vs');
     this.tabFS.classList.toggle('active', tab === 'fs');
-    this.editor.setValue(m ? (tab === 'vs' ? m.vertexSrc : m.fragmentSrc) : '');
-    this._showErrors(this.app.materialErrors?.get(materialId) ?? []);
+    this.tabSim.classList.toggle('active', tab === 'sim');
+    if (tab === 'sim') {
+      const em = this.app.emitters[this.app.selEmitter];
+      this.editor.setValue(em ? em.p.simSrc : '');
+      this._showErrors(em ? (this.app.simErrors?.get(em.p.id) ?? []) : []);
+      if (em && em.p.simMode !== 'shader') {
+        const note = el('div', 'compile-err',
+          'ℹ Sim shader is inactive — set the emitter\'s Simulation mode to "Compute shader (GPU)".');
+        this.errorsEl.prepend(note);
+      }
+    } else {
+      this.editor.setValue(m ? (tab === 'vs' ? m.vertexSrc : m.fragmentSrc) : '');
+      this._showErrors(this.app.materialErrors?.get(materialId) ?? []);
+    }
   }
 
   _scheduleApply() {
@@ -439,6 +519,16 @@ export class EditorPanel {
   }
 
   _commitBuffer() {
+    if (this.tab === 'sim') {
+      const em = this.app.emitters[this.app.selEmitter];
+      if (!em) return false;
+      const v = this.editor.getValue();
+      if (em.p.simSrc !== v) {
+        em.p.simSrc = v;
+        return true;
+      }
+      return false;
+    }
     const m = this.app.materials.find((x) => x.id === this.materialId);
     if (!m) return false;
     const v = this.editor.getValue();
@@ -452,25 +542,39 @@ export class EditorPanel {
 
   commit() {
     clearTimeout(this._debounce);
+    if (this.tab === 'sim') {
+      const em = this.app.emitters[this.app.selEmitter];
+      this._commitBuffer();
+      if (em) this.app.markSim(em);
+      return;
+    }
     if (this._commitBuffer()) this.app.markMaterial(this.materialId);
     else this.app.markMaterial(this.materialId); // force recompile to surface errors
   }
 
   onCompiled(materialId, errors) {
-    if (materialId !== this.materialId) return;
+    if (this.tab === 'sim' || materialId !== this.materialId) return;
+    this._showErrors(errors);
+  }
+
+  onSimCompiled(emitterId, errors) {
+    if (this.tab !== 'sim') return;
+    const em = this.app.emitters[this.app.selEmitter];
+    if (!em || em.p.id !== emitterId) return;
     this._showErrors(errors);
   }
 
   _showErrors(errors) {
-    const stage = this.tab === 'vs' ? 'vertex' : 'fragment';
+    const stage = this.tab === 'vs' ? 'vertex' : this.tab === 'sim' ? 'sim' : 'fragment';
     this.editor.setErrors(errors.filter((e) => e.stage === stage));
     this.errorsEl.innerHTML = '';
     if (!errors.length) {
       this.errorsEl.appendChild(el('div', 'compile-ok', '✓ compiled'));
       return;
     }
+    const label = { vertex: 'VS', fragment: 'FS', sim: 'SIM' };
     for (const e of errors.slice(0, 12)) {
-      const d = el('div', 'compile-err', `${e.stage === 'vertex' ? 'VS' : 'FS'}${e.variant ? ` · ${e.variant}` : ''} — line ${e.line}: ${e.msg}`);
+      const d = el('div', 'compile-err', `${label[e.stage] || e.stage}${e.variant ? ` · ${e.variant}` : ''} — line ${e.line}: ${e.msg}`);
       this.errorsEl.appendChild(d);
     }
   }
@@ -483,39 +587,41 @@ export function showHelp() {
 
 const HELP_HTML = `
 <div class="help">
-<p>Materials have a <b>programmable vertex and fragment stage</b>, wrapped shadertoy-style.
-The engine handles instancing, billboarding, curves and lighting — you write two small functions.</p>
+<p>Materials have a <b>programmable vertex and fragment stage</b> written in
+<b>WGSL</b> (the WebGPU shading language), wrapped shadertoy-style. The engine
+handles instancing, billboarding, curves and lighting — you write two small functions.
+The first parameter is a pointer: write through it directly (<code>s.albedo = ...</code>).</p>
 
 <h3>Vertex stage</h3>
-<pre>void mainVertex(inout VertexData v, in Particle p)</pre>
-<pre>struct VertexData {  vec3 positionWS;  vec3 normalWS;  vec2 uv;  };
+<pre>fn mainVertex(v: ptr&lt;function, VertexData&gt;, p: Particle)</pre>
+<pre>struct VertexData { positionWS: vec3f, normalWS: vec3f, uv: vec2f }
 struct Particle {
-  vec3 center;     // particle center (world)
-  vec3 velocity;   // world-space velocity
-  vec4 color;      // start color × color/alpha-over-life
-  float size;      // after size-over-life
-  float rotation;  // radians
-  float life;      // normalized 0..1
-  float seed;      // stable per-particle random 0..1
-};</pre>
+  center: vec3f,    // particle center (world)
+  velocity: vec3f,  // world-space velocity
+  color: vec4f,     // start color × color/alpha-over-life
+  size: f32,        // after size-over-life
+  rotation: f32,    // radians
+  life: f32,        // normalized 0..1
+  seed: f32,        // stable per-particle random 0..1
+}</pre>
 <p>Example — stretch billboards along velocity:</p>
 <pre>v.positionWS += p.velocity * 0.06 * (v.uv.y - 0.5) * 2.0;</pre>
 
 <h3>Fragment stage — PBR surface</h3>
-<pre>void mainSurface(inout Surface s, in SurfaceInput i)</pre>
+<pre>fn mainSurface(s: ptr&lt;function, Surface&gt;, i: SurfaceInput)</pre>
 <pre>struct Surface {
-  vec3 albedo;     // base color
-  float metallic;  // 0..1
-  float roughness; // 0..1
-  vec3 normal;     // world space (defaults to geometric normal)
-  vec3 emissive;   // HDR glow, added after lighting (drives bloom)
-  float occlusion; // ambient occlusion 0..1
-  float alpha;
-};
+  albedo: vec3f,    // base color
+  metallic: f32,    // 0..1
+  roughness: f32,   // 0..1
+  normal: vec3f,    // world space (defaults to geometric normal)
+  emissive: vec3f,  // HDR glow, added after lighting (drives bloom)
+  occlusion: f32,   // ambient occlusion 0..1
+  alpha: f32,
+}
 struct SurfaceInput {
-  vec2 uv;  vec4 color;  float life;  float seed;
-  vec3 positionWS;  vec3 normalWS;  vec3 viewDirWS;
-};</pre>
+  uv: vec2f,  color: vec4f,  life: f32,  seed: f32,
+  positionWS: vec3f,  normalWS: vec3f,  viewDirWS: vec3f,
+}</pre>
 <p>In the <b>Deferred</b> pipeline, opaque/cutout surfaces are written to the G-buffer and lit
 in a fullscreen pass; blended particles are forward-lit. In the <b>Forward</b> pipeline
 everything is lit inline. Unlit materials skip lighting: output = albedo + emissive.</p>
@@ -525,29 +631,29 @@ everything is lit inline. Unlit materials skip lighting: output = albedo + emiss
 <b>Deferred</b> pipeline the blended pass runs after the G-buffer and lighting passes,
 so the whole G-buffer is readable — this is what makes refraction, distortion and
 scene-aware tinting possible.</p>
-<pre>vec2 screenUV()            // this fragment's screen UV, 0..1
-bool gbufferAvailable()    // true only in Deferred, on a blended material
-GBuffer sampleGBuffer(vec2 uv)
+<pre>fn screenUV() -> vec2f           // this fragment's screen UV, 0..1
+fn gbufferAvailable() -> bool    // true only in Deferred, on a blended material
+fn sampleGBuffer(uv: vec2f) -> GBuffer
 
-float sceneDepth(vec2 uv)        // raw 0..1 (1.0 = sky / nothing)
-float sceneLinearDepth(vec2 uv)  // world units from the camera
-vec3  sceneWorldPos(vec2 uv)     // reconstructed world position</pre>
+fn sceneDepth(uv: vec2f) -> f32        // raw 0..1 (1.0 = sky / nothing)
+fn sceneLinearDepth(uv: vec2f) -> f32  // world units from the camera
+fn sceneWorldPos(uv: vec2f) -> vec3f   // reconstructed world position</pre>
 <pre>struct GBuffer {
-  vec3 albedo;      float metallic;
-  vec3 normal;      float roughness;   // normal is world space
-  vec3 emissive;    float occlusion;
-  float depth;      float linearDepth;
-  vec3 positionWS;
-  bool valid;       // false on sky, or when no G-buffer is bound
-};</pre>
+  albedo: vec3f,     metallic: f32,
+  normal: vec3f,     roughness: f32,   // normal is world space
+  emissive: vec3f,   occlusion: f32,
+  depth: f32,        linearDepth: f32,
+  positionWS: vec3f,
+  valid: bool,       // false on sky, or when no G-buffer is bound
+}</pre>
 <p>Example — refract the scene behind an additive/blended particle:</p>
-<pre>vec2 uv = screenUV();
-vec2 offset = (i.normalWS.xy) * 0.03 * i.color.a;
-GBuffer g = sampleGBuffer(uv + offset);
+<pre>let uv = screenUV();
+let offset = i.normalWS.xy * 0.03 * i.color.a;
+let g = sampleGBuffer(uv + offset);
 s.emissive = g.albedo * 2.0;      // pick up what's behind
 s.alpha = i.color.a;</pre>
 <p>Example — fade out where the particle meets solid geometry:</p>
-<pre>float d = sceneLinearDepth(screenUV()) - distance(uCameraPos, i.positionWS);
+<pre>let d = sceneLinearDepth(screenUV()) - distance(u.cameraPos, i.positionWS);
 s.alpha *= clamp(d / 0.4, 0.0, 1.0);</pre>
 <p class="muted">The same functions exist in every variant so a material never fails to
 compile, but an <b>opaque</b> surface is what <i>writes</i> the G-buffer and so cannot read
@@ -556,17 +662,73 @@ it, and the <b>Forward</b> pipeline has no G-buffer at all. In both cases
 defaults — depth still works in Forward. Always branch on it, or on <code>g.valid</code>,
 if your effect must survive a pipeline switch.</p>
 
-<h3>Built-in uniforms</h3>
-<pre>uTime (iTime)          effect time, seconds
-uResolution (iResolution)
-uMouse (iMouse)        xy pixels (y-up), z = button down
-uCameraPos             world-space camera position</pre>
+<h3>Compute simulation (Sim tab)</h3>
+<p>Each emitter can switch from the <b>Properties</b> sim (CPU) to a <b>compute
+shader</b> sim (GPU) that scales to ~100k particles. You write two hooks; the
+engine handles spawning budgets, slot recycling, culling dead particles and
+(for alpha-blend) depth sorting — all on the GPU:</p>
+<pre>fn spawn(p: ptr&lt;function, Particle&gt;, ctx: SpawnCtx)     // initialize a particle
+fn simulate(p: ptr&lt;function, Particle&gt;, ctx: SimCtx)    // step it each frame</pre>
+<pre>struct Particle {
+  position: vec3f,  age: f32,
+  velocity: vec3f,  lifetime: f32,   // spawn() must set lifetime
+  color: vec4f,
+  seed: f32,  size: f32,  rotation: f32,  rotVel: f32,
+  // ...plus any custom fields you add in the Simulation section
+}
+struct SpawnCtx { index: u32, emitterPos: vec3f, time: f32 }
+struct SimCtx   { index: u32, dt: f32, time: f32 }</pre>
+<pre>rand() -> f32                   // fresh 0..1 each call, deterministic per particle
+randRange(lo, hi) -> f32
+randUnitVec() -> vec3f
+curveSpeed(life01) -> f32       // the Speed/life curve
+sp.*                            // every emitter property as a uniform:
+   emitterPos gravity drag boxSize colorA colorB speedRange lifetimeRange
+   sizeRange rotationRange rotSpeedRange spread shapeRadius shapeAngle
+   shapeType capacity dt time</pre>
+
+<h4>Reading the other particles</h4>
+<p><code>neighbors</code> is a read-only snapshot of the whole particle array as of
+<i>last</i> frame — this is what a property editor fundamentally can't express, and
+the reason flocking, trails and contact effects need a compute sim. Reading the live
+array instead would race the writes other invocations are making right now, so the
+engine copies it aside first (and only when your code actually mentions
+<code>neighbors</code>, since the copy costs bandwidth).</p>
+<pre>neighbors[j]          // a Particle; j in 0 .. sp.capacity-1
+neighbors[j].lifetime &lt;= 0.0   // empty slot — skip it</pre>
+<pre>// separation / alignment / cohesion over the neighbourhood
+for (var j = 0u; j &lt; u32(sp.capacity); j++) {
+  if (j == ctx.index) { continue; }
+  let other = neighbors[j];
+  if (other.lifetime &lt;= 0.0) { continue; }
+  let delta = other.position - p.position;
+  ...
+}</pre>
+<p class="muted">That loop is O(n²) — fine for a few hundred particles, but cap the
+scan (<code>min(u32(sp.capacity), 1024u)</code>) so raising <b>Max particles</b> can't
+lock the GPU. See the <b>Boids (compute)</b> preset for a complete example.</p>
+<p>"Convert to sim shader" seeds the editor with the exact WGSL that reproduces
+the property-editor behavior — sliders keep working through <code>sp.*</code>
+until you replace them. Custom fields (e.g. a <code>home: vec3f</code> anchor or
+a <code>phase: f32</code>) persist per particle across frames.</p>
+
+<h3>Built-in uniforms (struct <code>u</code>)</h3>
+<pre>u.time          effect time, seconds
+u.resolution    canvas size in pixels
+u.mouse         xy pixels (y-up), z = button down
+u.cameraPos     world-space camera position</pre>
 
 <h3>Built-in functions</h3>
 <pre>hash11(f) hash21(v2) hash33(v3)   // fast hashes → 0..1
 noise2(v2) noise3(v3)             // value noise
 fbm2(v2) fbm3(v3)                 // 4-octave fbm
+fmod(x, y) fmod3(v3, y)           // GLSL-style floor mod
 PI, TAU</pre>
+
+<h3>WGSL crib sheet (coming from GLSL)</h3>
+<pre>vec3(...)  →  vec3f(...)          float x = 1.0;  →  let x = 1.0;   (or var)
+mix / clamp: min/max args must match the vector type: clamp(v, vec3f(0.0), vec3f(1.0))
+mod(x, y)  →  fmod(x, y)          statements need no forward declarations</pre>
 
 <h3>Tips</h3>
 <ul>
@@ -574,6 +736,6 @@ PI, TAU</pre>
 <li>Use <code>s.emissive</code> with values &gt; 1 for glow — bloom picks it up.</li>
 <li><code>i.color</code> already includes the color-over-life gradient and alpha-over-life curve.</li>
 <li>Vary per particle with <code>i.seed</code> (e.g. <code>fbm2(uv + i.seed * 19.0)</code>).</li>
-<li>Additive materials: alpha scales brightness; albedo is usually vec3(0).</li>
+<li>Additive materials: alpha scales brightness; albedo is usually vec3f(0.0).</li>
 </ul>
 </div>`;

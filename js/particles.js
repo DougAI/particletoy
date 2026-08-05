@@ -3,12 +3,17 @@
 // An Effect is composed of multiple Emitters (composability); each emitter
 // references a Material by id and owns its over-lifetime curves.
 
-import { makeCurve, makeGradient, evalCurve, bakeEmitterLUT, uploadLUT } from './curves.js';
-import { makeQuad, makeCube, makeSphere, parseOBJ, uploadMesh } from './geometry.js';
+import { makeCurve, makeGradient, evalCurve, bakeEmitterLUT, uploadLUT, LUT_SIZE, LUT_ROWS } from './curves.js';
+import { makeQuad, makeCube, makeSphere, parseOBJ } from './geometry.js';
+import { UniformBlock, createTex, uploadMesh } from './gpu.js';
+import { DRAW_FIELDS } from './shaderlib.js';
 import { randRange, lerp, degToRad } from './math3d.js';
 
 export const INSTANCE_FLOATS = 16; // pos(3) size(1) color(4) life seed rot pad vel(3) pad
 const SIM_FLOATS = 16;             // px py pz vx vy vz age life seed size0 rot rotVel r g b a
+
+// Per-emitter particle count ceiling, shared by both simulation modes.
+export const MAX_CAPACITY = 100_000;
 
 let nextEmitterId = 1;
 
@@ -18,6 +23,12 @@ export function defaultEmitterParams() {
     name: 'Emitter',
     enabled: true,
     materialId: null,
+    // GPU sim: 'props' runs the classic CPU sim driven by the properties
+    // below; 'shader' runs a WGSL compute sim (simSrc, or the generated
+    // default when empty) with optional extra per-particle fields.
+    simMode: 'props',
+    simSrc: '',
+    fields: [], // [{name, type: 'f32'|'vec2'|'vec3'|'vec4'}]
     meshType: 'quad', // quad | sphere | cube | custom
     customMeshObj: '',
     position: [0, 0, 0],
@@ -56,29 +67,48 @@ export class Emitter {
     this.spawnAccum = 0;
     this.count = 0;
     this.capacity = 0;
+    // GPU sim state (runtime attached by the renderer in shader mode)
+    this.simRt = null;
+    this.simDirty = false;
+    this._pendingSpawn = 0;
+    this._spawnCursor = 0;
+    this._stepDt = 0;
     this.sim = null;       // Float32Array
     this.inst = null;      // Float32Array
     this.sortKeys = null;  // Float32Array for transparent sorting
     this.sortOrder = null; // Uint32Array
     // GPU state
     this.lutTex = null;
+    this.lutView = null;
     this.lutDirty = true;
     this.instanceBuf = null;
-    this.vao = null;
-    this.mesh = null;      // uploaded mesh currently bound in vao
+    this.drawUB = null;      // per-draw uniform block (mesh mode, cutoff, ...)
+    this.bindGroups = null;  // {gbuffer, forward}
+    this._bgVersion = -1;    // renderer.targetsVersion the bind groups were built for
+    this._gpuCapacity = 0;
+    this.mesh = null;        // uploaded mesh currently in use
     this.meshKey = '';
-    this.customMeshCache = null; // {src, mesh}
     this._ensureCapacity();
   }
 
   _ensureCapacity() {
-    const cap = Math.max(1, Math.min(100000, this.p.spawn.max | 0));
-    if (cap === this.capacity && this.sim) return false;
+    const cap = Math.max(1, Math.min(MAX_CAPACITY, this.p.spawn.max | 0));
+    // Compute-sim emitters never touch the CPU-side arrays (step() returns
+    // before reaching them, fillInstances() is only called for CPU-driven
+    // emitters) — skip allocating them so a GPU sim doesn't also carry a
+    // same-size CPU allocation it never uses.
+    const needsCPU = this.p.simMode !== 'shader';
+    const cpuStale = needsCPU ? !this.sim : !!this.sim;
+    if (cap === this.capacity && !cpuStale) return false;
     this.capacity = cap;
-    this.sim = new Float32Array(cap * SIM_FLOATS);
-    this.inst = new Float32Array(cap * INSTANCE_FLOATS);
-    this.sortKeys = new Float32Array(cap);
-    this.sortOrder = new Uint32Array(cap);
+    if (needsCPU) {
+      this.sim = new Float32Array(cap * SIM_FLOATS);
+      this.inst = new Float32Array(cap * INSTANCE_FLOATS);
+      this.sortKeys = new Float32Array(cap);
+      this.sortOrder = new Uint32Array(cap);
+    } else {
+      this.sim = this.inst = this.sortKeys = this.sortOrder = null;
+    }
     this.count = Math.min(this.count, cap);
     return true; // GPU buffer needs realloc
   }
@@ -87,27 +117,31 @@ export class Emitter {
     this.time = 0;
     this.spawnAccum = 0;
     this.count = 0;
+    this._pendingSpawn = 0;
+    this._spawnCursor = 0;
+    this._stepDt = 0;
+    if (this.simRt) this.simRt.resetPending = true;
   }
 
   /** Advance simulation by dt seconds (already time-scaled). */
   step(dt) {
     const p = this.p;
-    if (!p.enabled) { this.count = 0; return; }
-    const capChanged = this._ensureCapacity();
-    if (capChanged) this._gpuBufferDirty = true;
+    if (!p.enabled) { this.count = 0; this._pendingSpawn = 0; return; }
+    this._ensureCapacity(); // GPU buffer realloc is detected in ensureGPU
 
     const prevTime = this.time;
     this.time += dt;
+    this._stepDt = dt;
 
-    // --- spawning
+    // --- spawn budget (rate + bursts), shared by the CPU and GPU sim paths
+    let budget = 0;
     const dur = Math.max(0.01, p.duration);
     const active = p.looping || this.time <= dur;
     if (active && dt > 0) {
       // continuous rate
       this.spawnAccum += p.spawn.rate * dt;
-      let n = Math.floor(this.spawnAccum);
-      this.spawnAccum -= n;
-      while (n-- > 0) this._spawnOne();
+      budget = Math.floor(this.spawnAccum);
+      this.spawnAccum -= budget;
       // bursts: fire when local time crosses burst.time
       const prevLocal = p.looping ? prevTime % dur : prevTime;
       const curLocal = p.looping ? this.time % dur : this.time;
@@ -120,9 +154,18 @@ export class Emitter {
           fire = bt > prevLocal - 1e-9 || bt <= curLocal;
         }
         if (prevTime === 0 && bt <= 1e-9) fire = true;
-        if (fire) for (let i = 0; i < b.count; i++) this._spawnOne();
+        if (fire) budget += b.count;
       }
     }
+
+    if (p.simMode === 'shader') {
+      // GPU path: the compute shader spawns and integrates; the renderer
+      // consumes _pendingSpawn on the next frame.
+      this._pendingSpawn = (this._pendingSpawn | 0) + budget;
+      return;
+    }
+
+    while (budget-- > 0) this._spawnOne();
 
     // --- integrate
     const s = this.sim;
@@ -261,94 +304,88 @@ export class Emitter {
   }
 
   // ------------------------------------------------------------- GPU
-  ensureGL(gl, meshLib) {
-    if (!this.lutTex) { this.lutTex = gl.createTexture(); this.lutDirty = true; }
+  /** Ensures all GPU-side state (LUT, instance buffer, draw uniforms, mesh,
+   *  bind groups) exists and is current. Called by the renderer each frame. */
+  ensureGPU(renderer) {
+    const device = renderer.device;
+    this._ensureCapacity();
+
+    if (!this.drawUB) {
+      this.drawUB = new UniformBlock(device, DRAW_FIELDS, 'emitter-draw');
+      this._bgVersion = -1;
+    }
+    if (!this.lutTex) {
+      this.lutTex = createTex(device, LUT_SIZE, LUT_ROWS, 'rgba16float',
+        GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST, 'emitter-lut');
+      this.lutView = this.lutTex.createView();
+      this.lutDirty = true;
+      this._bgVersion = -1;
+    }
     if (this.lutDirty) {
-      uploadLUT(gl, this.lutTex, bakeEmitterLUT(this.p));
+      uploadLUT(device, this.lutTex, bakeEmitterLUT(this.p));
       this.lutDirty = false;
     }
-    if (!this.instanceBuf) {
-      this.instanceBuf = gl.createBuffer();
-      this._gpuBufferDirty = true;
-    }
-    if (this._gpuBufferDirty) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuf);
-      gl.bufferData(gl.ARRAY_BUFFER, this.capacity * INSTANCE_FLOATS * 4, gl.DYNAMIC_DRAW);
-      gl.bindBuffer(gl.ARRAY_BUFFER, null);
-      this._gpuBufferDirty = false;
-      this._vaoDirty = true;
+    // This buffer is only the target of uploadInstances() for CPU-driven
+    // emitters; a compute-sim emitter draws from its SimRuntime's own storage
+    // buffers instead, so skip (and free) it in shader mode — at large
+    // capacities it would otherwise be a same-size dead GPU allocation.
+    const needsInstanceBuf = this.p.simMode !== 'shader';
+    if (!needsInstanceBuf) {
+      if (this.instanceBuf) { this.instanceBuf.destroy(); this.instanceBuf = null; this._gpuCapacity = 0; }
+    } else if (!this.instanceBuf || this._gpuCapacity !== this.capacity) {
+      this.instanceBuf?.destroy();
+      this.instanceBuf = device.createBuffer({
+        label: 'emitter-instances',
+        size: this.capacity * INSTANCE_FLOATS * 4,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      });
+      this._gpuCapacity = this.capacity;
     }
     // mesh
     const key = this.p.meshType === 'custom'
       ? `custom:${this.p.customMeshObj.length}:${this.p.customMeshObj.slice(0, 64)}`
       : this.p.meshType;
-    if (key !== this.meshKey || !this.vao || this._vaoDirty) {
+    if (key !== this.meshKey || !this.mesh) {
       this.meshKey = key;
-      this.mesh = meshLib.get(gl, this.p);
-      this._buildVAO(gl);
-      this._vaoDirty = false;
+      this.mesh = renderer.meshLib.get(device, this.p);
+    }
+    if (this._bgVersion !== renderer.targetsVersion) {
+      this.bindGroups = renderer.makeEmitterBindGroups(this);
+      this._bgVersion = renderer.targetsVersion;
     }
   }
 
-  _buildVAO(gl) {
-    if (this.vao) gl.deleteVertexArray(this.vao);
-    this.vao = gl.createVertexArray();
-    gl.bindVertexArray(this.vao);
-    const m = this.mesh;
-    gl.bindBuffer(gl.ARRAY_BUFFER, m.vboPos);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, m.vboNrm);
-    gl.enableVertexAttribArray(1);
-    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, m.vboUV);
-    gl.enableVertexAttribArray(2);
-    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuf);
-    for (let i = 0; i < 4; i++) {
-      gl.enableVertexAttribArray(3 + i);
-      gl.vertexAttribPointer(3 + i, 4, gl.FLOAT, false, INSTANCE_FLOATS * 4, i * 16);
-      gl.vertexAttribDivisor(3 + i, 1);
-    }
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, m.ibo);
-    gl.bindVertexArray(null);
-    gl.bindBuffer(gl.ARRAY_BUFFER, null);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
-  }
-
-  uploadInstances(gl, n) {
+  uploadInstances(device, n) {
     if (!n) return;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuf);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.inst, 0, n * INSTANCE_FLOATS);
-    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    device.queue.writeBuffer(this.instanceBuf, 0, this.inst, 0, n * INSTANCE_FLOATS);
   }
 
-  dispose(gl) {
-    if (this.lutTex) gl.deleteTexture(this.lutTex);
-    if (this.instanceBuf) gl.deleteBuffer(this.instanceBuf);
-    if (this.vao) gl.deleteVertexArray(this.vao);
-    if (this.customMeshCache?.mesh) this.customMeshCache.mesh.dispose();
-    this.lutTex = this.instanceBuf = this.vao = null;
+  dispose() {
+    this.lutTex?.destroy();
+    this.instanceBuf?.destroy();
+    this.drawUB?.dispose();
+    this.simRt?.dispose();
+    this.lutTex = this.lutView = this.instanceBuf = this.drawUB = this.bindGroups = this.simRt = null;
   }
 }
 
 /** Shared mesh library: quad/cube/sphere shared, custom meshes cached per emitter source. */
 export class MeshLibrary {
   constructor() { this.shared = {}; }
-  get(gl, emitterParams) {
+  get(device, emitterParams) {
     const t = emitterParams.meshType;
     if (t === 'custom') {
       const src = emitterParams.customMeshObj || '';
       if (!this.customCache) this.customCache = new Map();
       if (!this.customCache.has(src)) {
         const parsed = parseOBJ(src);
-        this.customCache.set(src, parsed ? uploadMesh(gl, parsed) : this.get(gl, { meshType: 'cube' }));
+        this.customCache.set(src, parsed ? uploadMesh(device, parsed) : this.get(device, { meshType: 'cube' }));
       }
       return this.customCache.get(src);
     }
     if (!this.shared[t]) {
       const mesh = t === 'sphere' ? makeSphere() : t === 'cube' ? makeCube() : makeQuad();
-      this.shared[t] = uploadMesh(gl, mesh);
+      this.shared[t] = uploadMesh(device, mesh);
     }
     return this.shared[t];
   }

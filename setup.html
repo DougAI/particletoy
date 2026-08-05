@@ -77,7 +77,7 @@ python serve.py            # then open http://localhost:8917</code></pre>
   <p class="muted">Any static server works, but on Windows avoid plain
   <code>python -m http.server</code> — it can serve <code>.js</code> as
   <code>text/plain</code> (registry MIME types), which breaks ES modules.
-  Requirements: WebGL2 + <code>EXT_color_buffer_float</code> (all current browsers).</p>
+  Requirements: WebGPU (current Chrome / Edge / Safari / Firefox).</p>
 
   <h3>Page map</h3>
   <table>
@@ -185,7 +185,7 @@ Supabase
     <li>Private particles are filtered by RLS in every query, including embeds.</li>
     <li>View counts go through a <code>bump_views()</code> RPC; likes/comments maintain
         counters via triggers.</li>
-    <li>Card hover-previews and the POTD render the <i>actual effect</i> live in WebGL —
+    <li>Card hover-previews and the POTD render the <i>actual effect</i> live in WebGPU —
         thumbnails are only the static fallback, captured on publish.</li>
   </ul>
 

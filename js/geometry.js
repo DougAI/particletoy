@@ -170,27 +170,4 @@ export function parseOBJ(text) {
   }
 }
 
-/** Uploads a mesh to GPU buffers. Returns {vboPos, vboNrm, vboUV, ibo, count, indexType}. */
-export function uploadMesh(gl, mesh) {
-  const mk = (data, target = gl.ARRAY_BUFFER) => {
-    const b = gl.createBuffer();
-    gl.bindBuffer(target, b);
-    gl.bufferData(target, data, gl.STATIC_DRAW);
-    return b;
-  };
-  const vboPos = mk(mesh.positions);
-  const vboNrm = mk(mesh.normals);
-  const vboUV = mk(mesh.uvs);
-  const ibo = mk(mesh.indices, gl.ELEMENT_ARRAY_BUFFER);
-  gl.bindBuffer(gl.ARRAY_BUFFER, null);
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
-  return {
-    vboPos, vboNrm, vboUV, ibo,
-    count: mesh.indices.length,
-    indexType: mesh.indices instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT,
-    dispose() {
-      gl.deleteBuffer(vboPos); gl.deleteBuffer(vboNrm);
-      gl.deleteBuffer(vboUV); gl.deleteBuffer(ibo);
-    },
-  };
-}
+// Mesh GPU upload lives in gpu.js (uploadMesh) — this module is pure geometry.

@@ -100,7 +100,7 @@ function mountPlayer() {
   frame.appendChild(canvas);
   player = new EffectPlayer(canvas, { interactive: true, maxDpr: 1.75 });
   if (!player.ok) {
-    frame.innerHTML = `<div class="empty" style="border:none">${esc(player.error || 'WebGL2 unavailable')}</div>`;
+    frame.innerHTML = `<div class="empty" style="border:none">${esc(player.error || 'WebGPU unavailable')}</div>`;
     return;
   }
   player.load(row.data);

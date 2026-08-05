@@ -1,7 +1,10 @@
-// Material model: user vertex + fragment GLSL wrapped per pipeline variant.
+// Material model: user vertex + fragment WGSL wrapped per pipeline variant.
 
-import { Program, parseShaderErrors } from './glutil.js';
-import { buildParticleVS, buildParticleFS, DEFAULT_VS, DEFAULT_FS } from './shaderlib.js';
+import { compileModule, PARTICLE_VERTEX_BUFFERS } from './gpu.js';
+import {
+  buildParticleVS, buildParticleFS, DEFAULT_VS, DEFAULT_FS,
+  GBUF_FORMATS, SCENE_FORMAT, DEPTH_FORMAT,
+} from './shaderlib.js';
 
 let nextId = 1;
 
@@ -29,54 +32,103 @@ export function isOpaqueMode(m) {
   return m.blendMode === 'opaque' || m.blendMode === 'cutout';
 }
 
+function blendState(m) {
+  if (m.blendMode === 'add') {
+    const f = { srcFactor: 'one', dstFactor: 'one' };
+    return { color: f, alpha: f };
+  }
+  if (m.blendMode === 'blend') {
+    const f = { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' };
+    return { color: f, alpha: f };
+  }
+  return undefined; // opaque / cutout
+}
+
 /**
- * GPU-side compiled state for a material. Keeps last-good programs on error
+ * GPU-side compiled state for a material. Keeps last-good pipelines on error
  * (shadertoy-style: broken edits don't kill the running effect).
+ *
+ * compile() is async (WGSL compile info and pipeline creation both are); the
+ * returned promise resolves to the error list. A newer compile supersedes an
+ * older in-flight one.
  */
 export class MaterialRuntime {
-  constructor(gl, material) {
-    this.gl = gl;
+  constructor(renderer, material) {
+    this.renderer = renderer;
     this.material = material;
-    this.programs = { gbuffer: null, forward: null }; // Program instances
+    this.pipelines = { gbuffer: null, forward: null };
     this.errors = [];   // [{stage: 'vertex'|'fragment', variant, line, msg}]
     this.dirty = true;
+    this._seq = 0;
+  }
+
+  _pipelineDesc(variant, vsModule, fsModule) {
+    const m = this.material;
+    const opaque = isOpaqueMode(m);
+    return {
+      label: `${m.name}:${variant}`,
+      layout: this.renderer.particleLayout[variant],
+      vertex: { module: vsModule, entryPoint: 'vsMain', buffers: PARTICLE_VERTEX_BUFFERS },
+      fragment: {
+        module: fsModule, entryPoint: 'fsMain',
+        targets: variant === 'gbuffer'
+          ? GBUF_FORMATS.map((format) => ({ format }))
+          : [{ format: SCENE_FORMAT, blend: blendState(m) }],
+      },
+      primitive: {
+        topology: 'triangle-list',
+        cullMode: m.doubleSided ? 'none' : 'back',
+        frontFace: 'ccw',
+      },
+      depthStencil: {
+        format: DEPTH_FORMAT,
+        depthCompare: 'less-equal',
+        // gbuffer + forward-opaque write depth; the blended pass does not.
+        depthWriteEnabled: variant === 'gbuffer' ? true : opaque,
+      },
+    };
   }
 
   /** Recompile the variants required by the current pipeline. */
-  compile(neededVariants) {
-    const gl = this.gl;
+  async compile(neededVariants) {
+    const seq = ++this._seq;
+    const device = this.renderer.device;
     const m = this.material;
-    this.errors = [];
+    this.dirty = false;
+    const errors = [];
     const opts = { blendMode: m.blendMode, lit: m.lit, soft: m.softParticles };
 
-    for (const variant of neededVariants) {
-      const vs = buildParticleVS(m.vertexSrc);
+    const vs = buildParticleVS(m.vertexSrc);
+    const vsRes = await compileModule(device, vs.src, `${m.name}:vs`);
+    for (const e of vsRes.errors) {
+      errors.push({ stage: 'vertex', variant: '', line: Math.max(1, e.line - vs.lineOffset), msg: e.msg });
+    }
+
+    // Blended materials are never drawn through the G-buffer pass.
+    const variants = neededVariants.filter((v) => v !== 'gbuffer' || isOpaqueMode(m));
+    for (const variant of variants) {
       const fs = buildParticleFS(m.fragmentSrc, variant, opts);
-      const prog = new Program(gl, vs.src, fs.src, `${m.name}:${variant}`);
-      if (prog.error) {
-        const offset = prog.error.stage === 'vertex' ? vs.lineOffset : fs.lineOffset;
-        const stage = prog.error.stage === 'link' ? 'fragment' : prog.error.stage;
-        for (const e of parseShaderErrors(prog.error.log, offset)) {
-          this.errors.push({ stage, variant, line: e.line, msg: e.msg });
-        }
-        if (!this.errors.length) {
-          this.errors.push({ stage, variant, line: 0, msg: prog.error.log || 'unknown shader error' });
-        }
-        prog.dispose();
-        // keep previous program for this variant if it exists
-      } else {
-        if (this.programs[variant]) this.programs[variant].dispose();
-        this.programs[variant] = prog;
+      const fsRes = await compileModule(device, fs.src, `${m.name}:${variant}`);
+      for (const e of fsRes.errors) {
+        errors.push({ stage: 'fragment', variant, line: Math.max(1, e.line - fs.lineOffset), msg: e.msg });
+      }
+      if (vsRes.errors.length || fsRes.errors.length) continue;
+      try {
+        const pipeline = await device.createRenderPipelineAsync(this._pipelineDesc(variant, vsRes.module, fsRes.module));
+        if (seq === this._seq) this.pipelines[variant] = pipeline;
+        // keep previous pipeline for this variant on failure
+      } catch (ex) {
+        errors.push({ stage: 'fragment', variant, line: 0, msg: ex?.message || 'pipeline creation failed' });
       }
     }
-    this.dirty = false;
-    return this.errors;
+    if (!isOpaqueMode(m)) this.pipelines.gbuffer = null;
+
+    if (seq === this._seq) this.errors = errors;
+    return errors;
   }
 
   dispose() {
-    for (const k of Object.keys(this.programs)) {
-      if (this.programs[k]) this.programs[k].dispose();
-      this.programs[k] = null;
-    }
+    this.pipelines = { gbuffer: null, forward: null };
+    this._seq++;
   }
 }

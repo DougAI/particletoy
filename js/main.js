@@ -1,10 +1,11 @@
 // Application bootstrap: state, frame loop, toolbar wiring.
 
-import { createGL } from './glutil.js';
+import { createGPU } from './gpu.js';
 import { Renderer, defaultScene } from './renderer.js';
 import { OrbitCamera } from './camera.js';
 import { Emitter, defaultEmitterParams } from './particles.js';
 import { makeMaterial, MaterialRuntime, serializeMaterial } from './materials.js';
+import { migrateMaterial } from './glsl2wgsl.js';
 import { PRESETS } from './presets.js';
 import { buildInspector, EditorPanel, modal, toast, showHelp } from './ui.js';
 import {
@@ -15,15 +16,15 @@ import * as api from './backend.js';
 import { captureCanvasJPEG } from './player.js';
 
 const canvas = document.getElementById('gl');
-const { gl, error: glError } = createGL(canvas);
-if (!gl) {
+const { device, context, format, error: gpuError } = await createGPU(canvas);
+if (!device) {
   const e = document.getElementById('gl-error');
   e.classList.remove('hidden');
-  e.textContent = glError;
-  throw new Error(glError);
+  e.textContent = gpuError;
+  throw new Error(gpuError);
 }
 
-const renderer = new Renderer(gl, canvas);
+const renderer = new Renderer({ device, context, format, canvas });
 const camera = new OrbitCamera(canvas);
 
 // ---------------------------------------------------------------- app state
@@ -39,11 +40,14 @@ const app = {
   timeScale: 1,
   time: 0,
   materialRuntimes: new Map(),
+  simErrors: new Map(),
   markLut(em) { em.lutDirty = true; },
   markMaterial(id) {
     const rt = app.materialRuntimes.get(id);
     if (rt) rt.dirty = true;
   },
+  markSim(em) { em.simDirty = true; },
+  openSimInEditor() { editorPanel.show(editorPanel.materialId, 'sim'); },
   addEmitter(p) {
     app.emitters.push(new Emitter(p));
     app.selEmitter = app.emitters.length - 1;
@@ -52,7 +56,7 @@ const app = {
   removeEmitter(i) {
     const em = app.emitters[i];
     if (!em) return;
-    em.dispose(gl);
+    em.dispose();
     app.emitters.splice(i, 1);
     app.selEmitter = Math.max(0, Math.min(app.selEmitter, app.emitters.length - 1));
     app.refreshUI();
@@ -88,7 +92,7 @@ const app = {
     editorPanel.refreshMaterials();
   },
 };
-window.__particletoy = { app, renderer, gl, canvas }; // for curious consoles
+window.__particletoy = { app, renderer, device, canvas }; // for curious consoles
 
 // Cloud state: set when the effect was loaded from (or published to) the
 // community gallery, so Publish knows whether to update-in-place or create.
@@ -108,6 +112,13 @@ function updatePublishButton() {
 
 const editorPanel = new EditorPanel(app);
 
+// GPU sim compiles resolve asynchronously inside the renderer; surface the
+// structured errors in the editor's Sim tab like material errors.
+renderer.onSimCompiled = (em, errors) => {
+  app.simErrors.set(em.p.id, errors);
+  editorPanel.onSimCompiled(em.p.id, errors);
+};
+
 // ---------------------------------------------------------------- state load
 function mergeEmitterParams(p) {
   const d = defaultEmitterParams();
@@ -118,13 +129,13 @@ function mergeEmitterParams(p) {
 }
 
 function applyData(obj) {
-  for (const em of app.emitters) em.dispose(gl);
+  for (const em of app.emitters) em.dispose();
   for (const rt of app.materialRuntimes.values()) rt.dispose();
   app.materialRuntimes.clear();
   app.materialErrors.clear();
 
   app.name = obj.name || 'Untitled';
-  app.materials = (obj.materials || []).map((m) => ({ ...makeMaterial({}), ...m }));
+  app.materials = (obj.materials || []).map((m) => migrateMaterial({ ...makeMaterial({}), ...m }));
   if (!app.materials.length) app.materials = [makeMaterial({ name: 'Default' })];
   app.emitters = (obj.emitters || []).map((p) => new Emitter(mergeEmitterParams(structuredClone(p))));
   if (obj.scene) app.scene = { ...defaultScene(), ...structuredClone(obj.scene) };
@@ -156,14 +167,15 @@ function syncMaterials() {
   for (const m of app.materials) {
     let rt = app.materialRuntimes.get(m.id);
     if (!rt) {
-      rt = new MaterialRuntime(gl, m);
+      rt = new MaterialRuntime(renderer, m);
       app.materialRuntimes.set(m.id, rt);
     }
     rt.material = m;
     if (rt.dirty) {
-      const errors = rt.compile(['gbuffer', 'forward']);
-      app.materialErrors.set(m.id, errors);
-      editorPanel.onCompiled(m.id, errors);
+      rt.compile(['gbuffer', 'forward']).then((errors) => {
+        app.materialErrors.set(m.id, errors);
+        editorPanel.onCompiled(m.id, errors);
+      });
     }
   }
 }
