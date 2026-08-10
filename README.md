@@ -12,6 +12,9 @@ This project was made entirely with AI prompting. Every line of code — editor,
 shader library, compute simulation, and community backend alike — was generated through
 prompting an AI assistant. No code in this repository was handwritten.
 
+The **DougAI** account hosting this repo is used exclusively for AI-generated projects.
+My non-AI, handwritten work lives at [github.com/douglaspotesta](https://github.com/douglaspotesta).
+
 ## Run it
  
 ```bash
