@@ -6,6 +6,12 @@ pipelines, and zero-infrastructure sharing.
 
 Built as a fully static web app: plain ES modules, WebGPU, no dependencies, no build step.
 
+## AI disclosure
+
+This project was made entirely with AI prompting. Every line of code — editor, renderer,
+shader library, compute simulation, and community backend alike — was generated through
+prompting an AI assistant. No code in this repository was handwritten.
+
 ## Run it
  
 ```bash
