@@ -87,7 +87,13 @@ export class Renderer {
         { binding: 1, visibility: V | F, buffer: {} },
         { binding: 2, visibility: V, sampler: {} },
         { binding: 3, visibility: V, texture: {} },
-        { binding: 4, visibility: F, texture: { sampleType: 'depth' } },
+        // Materials are compiled from Slang, whose Texture2D<float> emits
+        // texture_2d<f32>, not WGSL's texture_depth_2d — HLSL has no separate
+        // depth-texture type. depth32float accepts both 'depth' and
+        // 'unfilterable-float', and user code only ever loads this texel by
+        // texel, so the non-depth sample type costs nothing. (The engine's own
+        // deferred lighting pass is still WGSL and still declares 'depth'.)
+        { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 5, visibility: F, texture: {} },
         { binding: 6, visibility: F, texture: {} },
         { binding: 7, visibility: F, texture: {} },

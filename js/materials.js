@@ -1,6 +1,8 @@
-// Material model: user vertex + fragment WGSL wrapped per pipeline variant.
+// Material model: user vertex + fragment Slang wrapped per pipeline variant,
+// compiled to WGSL by js/slangc.js on the way to the device.
 
-import { compileModule, PARTICLE_VERTEX_BUFFERS } from './gpu.js';
+import { compileModule, particleVertexBuffers } from './gpu.js';
+import { loadSlang, compileSlang, STAGE } from './slangc.js';
 import {
   buildParticleVS, buildParticleFS, DEFAULT_VS, DEFAULT_FS,
   GBUF_FORMATS, SCENE_FORMAT, DEPTH_FORMAT,
@@ -58,17 +60,18 @@ export class MaterialRuntime {
     this.material = material;
     this.pipelines = { gbuffer: null, forward: null };
     this.errors = [];   // [{stage: 'vertex'|'fragment', variant, line, msg}]
+    this.compiledWGSL = null; // { vs, gbuffer?, forward?, vertexLocations } once compiled
     this.dirty = true;
     this._seq = 0;
   }
 
-  _pipelineDesc(variant, vsModule, fsModule) {
+  _pipelineDesc(variant, vsModule, fsModule, vertexLocations) {
     const m = this.material;
     const opaque = isOpaqueMode(m);
     return {
       label: `${m.name}:${variant}`,
       layout: this.renderer.particleLayout[variant],
-      vertex: { module: vsModule, entryPoint: 'vsMain', buffers: PARTICLE_VERTEX_BUFFERS },
+      vertex: { module: vsModule, entryPoint: 'vsMain', buffers: particleVertexBuffers(vertexLocations) },
       fragment: {
         module: fsModule, entryPoint: 'fsMain',
         targets: variant === 'gbuffer'
@@ -98,32 +101,61 @@ export class MaterialRuntime {
     const errors = [];
     const opts = { blendMode: m.blendMode, lit: m.lit, soft: m.softParticles };
 
+    try {
+      await loadSlang();
+    } catch (ex) {
+      const msg = `could not load the Slang compiler: ${ex?.message || ex}`;
+      if (seq === this._seq) this.errors = [{ stage: 'vertex', variant: '', line: 0, msg }];
+      return this.errors;
+    }
+
+    // Slang first (source -> WGSL), then the device (WGSL -> module). Slang
+    // catches everything the user can get wrong; a WGSL-stage error here would
+    // mean the engine emitted bad code, so both are reported the same way.
     const vs = buildParticleVS(m.vertexSrc);
-    const vsRes = await compileModule(device, vs.src, `${m.name}:vs`);
-    for (const e of vsRes.errors) {
+    const vsSlang = compileSlang(vs.src, [{ name: 'vsMain', stage: STAGE.vertex }]);
+    for (const e of vsSlang.errors) {
       errors.push({ stage: 'vertex', variant: '', line: Math.max(1, e.line - vs.lineOffset), msg: e.msg });
     }
+    const vsRes = vsSlang.wgsl ? await compileModule(device, vsSlang.wgsl, `${m.name}:vs`) : null;
+    for (const e of vsRes?.errors ?? []) {
+      errors.push({ stage: 'vertex', variant: '', line: 0, msg: e.msg });
+    }
+    const vsOk = vsRes && !vsRes.errors.length;
+
+    // The generated WGSL is kept so it can be saved alongside the effect — the
+    // gallery pages render from that cache rather than loading the compiler.
+    const wgsl = vsOk ? { vs: vsSlang.wgsl } : null;
 
     // Blended materials are never drawn through the G-buffer pass.
     const variants = neededVariants.filter((v) => v !== 'gbuffer' || isOpaqueMode(m));
     for (const variant of variants) {
       const fs = buildParticleFS(m.fragmentSrc, variant, opts);
-      const fsRes = await compileModule(device, fs.src, `${m.name}:${variant}`);
-      for (const e of fsRes.errors) {
+      const fsSlang = compileSlang(fs.src, [{ name: 'fsMain', stage: STAGE.fragment }]);
+      for (const e of fsSlang.errors) {
         errors.push({ stage: 'fragment', variant, line: Math.max(1, e.line - fs.lineOffset), msg: e.msg });
       }
-      if (vsRes.errors.length || fsRes.errors.length) continue;
+      const fsRes = fsSlang.wgsl ? await compileModule(device, fsSlang.wgsl, `${m.name}:${variant}`) : null;
+      for (const e of fsRes?.errors ?? []) {
+        errors.push({ stage: 'fragment', variant, line: 0, msg: e.msg });
+      }
+      if (!vsOk || !fsRes || fsRes.errors.length) continue;
       try {
-        const pipeline = await device.createRenderPipelineAsync(this._pipelineDesc(variant, vsRes.module, fsRes.module));
+        const pipeline = await device.createRenderPipelineAsync(
+          this._pipelineDesc(variant, vsRes.module, fsRes.module, vsSlang.vertexLocations));
         if (seq === this._seq) this.pipelines[variant] = pipeline;
         // keep previous pipeline for this variant on failure
+        if (wgsl) wgsl[variant] = fsSlang.wgsl;
       } catch (ex) {
         errors.push({ stage: 'fragment', variant, line: 0, msg: ex?.message || 'pipeline creation failed' });
       }
     }
     if (!isOpaqueMode(m)) this.pipelines.gbuffer = null;
 
-    if (seq === this._seq) this.errors = errors;
+    if (seq === this._seq) {
+      this.errors = errors;
+      if (wgsl) this.compiledWGSL = { ...this.compiledWGSL, ...wgsl, vertexLocations: vsSlang.vertexLocations };
+    }
     return errors;
   }
 

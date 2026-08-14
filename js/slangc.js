@@ -5,11 +5,14 @@
 // way to device.createShaderModule(). This module is the only thing that
 // touches the wasm.
 //
-// IMPORTANT: this file must never be imported — directly or transitively —
-// from index.html, browse.html or view.html. The compiler is a 24 MB binary
-// (9.75 MB gzipped) and those pages run live hover previews for casual
-// visitors; they render from the WGSL cached in each saved effect instead
-// (see share.js / player.js). Only editor.html may pull the compiler in.
+// IMPORTANT: loadSlang() fetches a 24 MB binary (9.75 MB gzipped) — roughly 25x
+// the whole rest of the app. index.html, browse.html and view.html run live
+// hover previews for casual visitors and must NEVER reach it; they render from
+// the WGSL cached in each saved effect instead (see share.js / player.js).
+//
+// Importing this module is free — the wasm sits behind a dynamic import inside
+// loadSlang() and nothing is fetched until that is called. So the rule to hold
+// is "the gallery pages never call loadSlang()", not "they never import this".
 
 const WASM_URL = './vendor/slang/slang-wasm.js';
 

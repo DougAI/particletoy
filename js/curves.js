@@ -117,6 +117,13 @@ fn ptLutU(life01: f32) -> f32 {
 }
 `;
 
+/** The same helper in Slang, for the user-facing material and sim preludes. */
+export const LUT_SAMPLE_SLANG = `
+float ptLutU(float life01) {
+  return (0.5 + saturate(life01) * ${LUT_SIZE - 1}.0) / ${LUT_SIZE}.0;
+}
+`;
+
 /**
  * Bakes an emitter's over-lifetime curves into a LUT_SIZE x LUT_ROWS RGBA image.
  * Row color: rgb = colorOverLife, a = alphaOverLife
