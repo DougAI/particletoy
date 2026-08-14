@@ -48,6 +48,12 @@ export class Renderer {
     this.context = context;
     this.canvasFormat = format;
     this.canvas = canvas;
+
+    // Where shader code comes from. The editor compiles Slang as you type;
+    // the gallery pages render from the WGSL saved with the effect and must
+    // never fetch the 24 MB compiler, so they set allowCompile = false.
+    this.wgslCache = null;
+    this.allowCompile = true;
     this.width = 0;
     this.height = 0;
     this.targetsVersion = 0;

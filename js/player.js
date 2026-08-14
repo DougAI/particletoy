@@ -11,7 +11,7 @@ import { Renderer, defaultScene } from './renderer.js';
 import { OrbitCamera } from './camera.js';
 import { Emitter, defaultEmitterParams } from './particles.js';
 import { makeMaterial, MaterialRuntime } from './materials.js';
-import { migrateMaterial } from './glsl2wgsl.js';
+import { isPreSlang } from './share.js';
 
 function mergeEmitterParams(p) {
   const d = defaultEmitterParams();
@@ -69,7 +69,18 @@ export class EffectPlayer {
 
   _load(data) {
     this._clear();
-    const materials = (data.materials || []).map((m) => migrateMaterial({ ...makeMaterial({}), ...m }));
+
+    // The player is embedded in the gallery pages, which must never pull down
+    // the 24 MB Slang compiler just to animate a hover preview. It renders
+    // only from the WGSL saved with the effect; anything else (a pre-Slang
+    // effect, or one published without a cache) reports rather than compiles.
+    this.renderer.wgslCache = data.wgslCache ?? null;
+    this.renderer.allowCompile = false;
+    this.unrenderable = isPreSlang(data) ? 'made with an older shader language'
+      : !data.wgslCache ? 'saved without compiled shaders'
+      : null;
+
+    const materials = (data.materials || []).map((m) => ({ ...makeMaterial({}), ...m }));
     if (!materials.length) materials.push(makeMaterial({ name: 'Default' }));
     const compiles = [];
     for (const m of materials) {

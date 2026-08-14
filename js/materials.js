@@ -3,6 +3,7 @@
 
 import { compileModule, particleVertexBuffers } from './gpu.js';
 import { loadSlang, compileSlang, STAGE } from './slangc.js';
+import { materialFromCache } from './wgslcache.js';
 import {
   buildParticleVS, buildParticleFS, DEFAULT_VS, DEFAULT_FS,
   GBUF_FORMATS, SCENE_FORMAT, DEPTH_FORMAT,
@@ -92,6 +93,33 @@ export class MaterialRuntime {
     };
   }
 
+  /**
+   * Builds pipelines straight from WGSL, skipping Slang entirely. Returns an
+   * error list on success, or null if the WGSL turned out unusable — which the
+   * cached path treats as a miss rather than an error, since the source is
+   * still there to recompile from.
+   */
+  async _buildPipelines(seq, variants, vsCode, fsCodeFor, vertexLocations) {
+    const device = this.renderer.device;
+    const m = this.material;
+    const vsRes = await compileModule(device, vsCode, `${m.name}:vs`);
+    if (vsRes.errors.length) return null;
+    for (const variant of variants) {
+      const fsRes = await compileModule(device, fsCodeFor(variant), `${m.name}:${variant}`);
+      if (fsRes.errors.length) return null;
+      try {
+        const pipeline = await device.createRenderPipelineAsync(
+          this._pipelineDesc(variant, vsRes.module, fsRes.module, vertexLocations));
+        if (seq === this._seq) this.pipelines[variant] = pipeline;
+      } catch {
+        return null;
+      }
+    }
+    if (!isOpaqueMode(m)) this.pipelines.gbuffer = null;
+    if (seq === this._seq) this.errors = [];
+    return this.errors;
+  }
+
   /** Recompile the variants required by the current pipeline. */
   async compile(neededVariants) {
     const seq = ++this._seq;
@@ -100,6 +128,26 @@ export class MaterialRuntime {
     this.dirty = false;
     const errors = [];
     const opts = { blendMode: m.blendMode, lit: m.lit, soft: m.softParticles };
+
+    // Blended materials are never drawn through the G-buffer pass.
+    const variants = neededVariants.filter((v) => v !== 'gbuffer' || isOpaqueMode(m));
+
+    // Cached path: the effect was saved with WGSL matching this exact source,
+    // so the compiler is not needed at all. This is how the gallery renders.
+    const hit = materialFromCache(this.renderer.wgslCache, m, variants);
+    if (hit) {
+      const built = await this._buildPipelines(seq, variants, hit.vs.code,
+        (v) => hit[v].code, hit.locations);
+      if (built) return built;
+      // Cache present but unusable (engine changed under it) — fall through and
+      // recompile if we're allowed to.
+    }
+
+    if (!this.renderer.allowCompile) {
+      const msg = 'this effect was saved without compiled shaders for these settings, so it cannot be rendered here — open it in the editor';
+      if (seq === this._seq) this.errors = [{ stage: 'fragment', variant: '', line: 0, msg }];
+      return this.errors;
+    }
 
     try {
       await loadSlang();
@@ -127,8 +175,6 @@ export class MaterialRuntime {
     // gallery pages render from that cache rather than loading the compiler.
     const wgsl = vsOk ? { vs: vsSlang.wgsl } : null;
 
-    // Blended materials are never drawn through the G-buffer pass.
-    const variants = neededVariants.filter((v) => v !== 'gbuffer' || isOpaqueMode(m));
     for (const variant of variants) {
       const fs = buildParticleFS(m.fragmentSrc, variant, opts);
       const fsSlang = compileSlang(fs.src, [{ name: 'fsMain', stage: STAGE.fragment }]);

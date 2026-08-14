@@ -5,12 +5,12 @@ import { Renderer, defaultScene } from './renderer.js';
 import { OrbitCamera } from './camera.js';
 import { Emitter, defaultEmitterParams } from './particles.js';
 import { makeMaterial, MaterialRuntime, serializeMaterial } from './materials.js';
-import { migrateMaterial } from './glsl2wgsl.js';
 import { PRESETS } from './presets.js';
 import { buildInspector, EditorPanel, modal, toast, showHelp, setHistoryRecorder, isTextEditing } from './ui.js';
 import { History } from './history.js';
+import { buildCache } from './wgslcache.js';
 import {
-  serializeState, encodeShareString, decodeShareString,
+  serializeState, isPreSlang, encodeShareString, decodeShareString,
   loadLibrary, saveToLibrary, deleteFromLibrary, downloadJSON, downloadBlob, pickJSONFile,
 } from './share.js';
 import * as api from './backend.js';
@@ -146,8 +146,22 @@ function applyData(obj) {
   app.materialErrors.clear();
   app.simErrors.clear();
 
+  // Effects saved before the Slang cutover hold WGSL, which this engine can no
+  // longer compile. Everything except the shaders still loads — emitters,
+  // curves, materials, scene — so the setup is intact and the old source is
+  // right there in the editor to port by hand. Saying so beats a black canvas
+  // and a wall of syntax errors.
+  const legacy = isPreSlang(obj) && (obj.materials?.length || obj.emitters?.length);
+  if (legacy) {
+    toast('This effect was made with the old WGSL shader language and its shaders can\'t run. Everything else loaded — the original source is in the editor to port.', 12000);
+  }
+
+  // The compiled-WGSL cache travels with the effect; hand it to the renderer
+  // before anything compiles so cached shaders skip the compiler entirely.
+  renderer.wgslCache = obj.wgslCache ?? null;
+
   app.name = obj.name || 'Untitled';
-  app.materials = (obj.materials || []).map((m) => migrateMaterial({ ...makeMaterial({}), ...m }));
+  app.materials = (obj.materials || []).map((m) => ({ ...makeMaterial({}), ...m }));
   if (!app.materials.length) app.materials = [makeMaterial({ name: 'Default' })];
   app.emitters = (obj.emitters || []).map((p) => new Emitter(mergeEmitterParams(structuredClone(p))));
   if (obj.scene) app.scene = { ...defaultScene(), ...structuredClone(obj.scene) };
@@ -159,8 +173,19 @@ function applyData(obj) {
   if (first) editorPanel.show(first.id, 'fs');
 }
 
-function currentData() {
-  return serializeState(app.name, app.emitters, app.materials.map(serializeMaterial), app.scene);
+/**
+ * The live effect as a saveable object.
+ *
+ * `withCache` attaches the WGSL every shader just compiled to, so the gallery
+ * pages can render the effect without downloading the Slang compiler. It is
+ * opt-in because it is bulky: share links skip it (they open in the editor
+ * anyway) and so do undo snapshots, which are capped by total size.
+ */
+function currentData({ withCache = false } = {}) {
+  const cache = withCache
+    ? buildCache(app.materials, app.materialRuntimes, app.emitters)
+    : null;
+  return serializeState(app.name, app.emitters, app.materials.map(serializeMaterial), app.scene, cache);
 }
 
 // ---------------------------------------------------------------- undo/redo
@@ -315,7 +340,7 @@ function wireToolbar() {
   });
 
   document.getElementById('btn-export').addEventListener('click', () => {
-    downloadJSON(currentData(), `${(app.name || 'effect').replace(/[^\w-]+/g, '_')}.particletoy.json`);
+    downloadJSON(currentData({ withCache: true }), `${(app.name || 'effect').replace(/[^\w-]+/g, '_')}.particletoy.json`);
   });
   document.getElementById('btn-export-media').addEventListener('click', showExportMedia);
   document.getElementById('btn-import').addEventListener('click', async () => {
@@ -329,7 +354,7 @@ function wireToolbar() {
   });
 
   document.getElementById('btn-save').addEventListener('click', () => {
-    saveToLibrary(app.name || 'Untitled', currentData());
+    saveToLibrary(app.name || 'Untitled', currentData({ withCache: true }));
     toast(`Saved “${app.name}” to library`);
   });
   document.getElementById('btn-library').addEventListener('click', showLibrary);
@@ -474,7 +499,7 @@ async function showPublish() {
         .split(',').map((t) => t.trim().toLowerCase().replace(/[^a-z0-9\-_ ]/g, '').replace(/\s+/g, '-'))
         .filter(Boolean).slice(0, 12);
       const asCopy = div.querySelector('#pub-copy')?.checked;
-      const payload = { title, description, tags, visibility, data: currentData() };
+      const payload = { title, description, tags, visibility, data: currentData({ withCache: true }) };
 
       let id = cloud.id;
       if (isCloudOwner() && !asCopy) {

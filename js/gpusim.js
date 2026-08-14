@@ -13,6 +13,7 @@ import {
   SIM_FIELDS, SHAPE_INDEX, PROPS_SIM_SRC, WORKGROUP_SIZE,
 } from './simlib.js';
 import { loadSlang, compileSlang, STAGE } from './slangc.js';
+import { simFromCache } from './wgslcache.js';
 import { degToRad } from './math3d.js';
 
 const nextPow2 = (x) => { let n = 1; while (n < x) n <<= 1; return n; };
@@ -222,6 +223,18 @@ export class SimRuntime {
     const em = this.em;
     const userCode = em.p.simSrc?.trim() ? em.p.simSrc : PROPS_SIM_SRC;
 
+    // Cached path: the WGSL saved with the effect still matches this source, so
+    // the compiler isn't needed. This is how the gallery runs compute sims.
+    const cached = simFromCache(this.renderer.wgslCache, em.p);
+    if (cached && await this._buildPipelines(seq, cached)) return this.errors;
+
+    if (!this.renderer.allowCompile) {
+      const errs = [{ stage: 'sim', variant: '', line: 0,
+        msg: 'this effect was saved without a compiled sim shader, so it cannot run here — open it in the editor' }];
+      if (seq === this._seq) this.errors = errs;
+      return errs;
+    }
+
     try {
       await loadSlang();
     } catch (ex) {
@@ -243,29 +256,43 @@ export class SimRuntime {
       errors.push({ stage: 'sim', variant: '', line: 0, msg: e.msg });
     }
     if (res && !res.errors.length) {
-      try {
-        const [spawn, update] = await Promise.all([
-          this.device.createComputePipelineAsync({ layout: this.layout, compute: { module: res.module, entryPoint: 'spawnMain' } }),
-          this.device.createComputePipelineAsync({ layout: this.layout, compute: { module: res.module, entryPoint: 'updateMain' } }),
-        ]);
-        if (seq === this._seq) {
-          this.pipeSpawn = spawn;
-          this.pipeUpdate = update;
-          // Kept so it can be saved with the effect — the gallery pages render
-          // from that cache instead of loading the compiler.
-          this.compiledWGSL = slang.wgsl;
-          // The field layout may have changed, so existing particle state is
-          // stale and gets cleared. Replay the emitter's spawn timeline too:
-          // an emitter that populates itself from a t=0 burst has already
-          // fired it, and would otherwise stay empty forever after an edit.
-          this.em.restart();
-        }
-      } catch (ex) {
-        errors.push({ stage: 'sim', variant: '', line: 0, msg: ex?.message || 'pipeline creation failed' });
+      if (!await this._buildPipelines(seq, slang.wgsl)) {
+        errors.push({ stage: 'sim', variant: '', line: 0, msg: 'pipeline creation failed' });
       }
     }
     if (seq === this._seq) this.errors = errors;
     return errors;
+  }
+
+  /**
+   * Builds both compute pipelines from WGSL, skipping Slang. Returns false if
+   * the WGSL turns out unusable, which the cached path treats as a miss.
+   */
+  async _buildPipelines(seq, wgsl) {
+    const res = await compileModule(this.device, wgsl, `sim:${this.em.p.name}`);
+    if (res.errors.length) return false;
+    try {
+      const [spawn, update] = await Promise.all([
+        this.device.createComputePipelineAsync({ layout: this.layout, compute: { module: res.module, entryPoint: 'spawnMain' } }),
+        this.device.createComputePipelineAsync({ layout: this.layout, compute: { module: res.module, entryPoint: 'updateMain' } }),
+      ]);
+      if (seq === this._seq) {
+        this.pipeSpawn = spawn;
+        this.pipeUpdate = update;
+        // Kept so it can be saved with the effect — the gallery pages render
+        // from that cache instead of loading the compiler.
+        this.compiledWGSL = wgsl;
+        this.errors = [];
+        // The field layout may have changed, so existing particle state is
+        // stale and gets cleared. Replay the emitter's spawn timeline too:
+        // an emitter that populates itself from a t=0 burst has already
+        // fired it, and would otherwise stay empty forever after an edit.
+        this.em.restart();
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   _ensureBindGroups() {

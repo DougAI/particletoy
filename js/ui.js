@@ -186,7 +186,7 @@ export function modal(title, contentNode, { wide } = {}) {
 }
 
 let toastTimer = null;
-export function toast(msg) {
+export function toast(msg, ms = 2600) {
   let t = document.getElementById('toast');
   if (!t) {
     t = el('div');
@@ -196,7 +196,7 @@ export function toast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
 
 // ---------------------------------------------------------------- inspector
