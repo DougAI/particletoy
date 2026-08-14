@@ -17,10 +17,15 @@ class Handler(SimpleHTTPRequestHandler):
         ".html": "text/html",
         ".json": "application/json",
         ".svg": "image/svg+xml",
+        ".wasm": "application/wasm",
     }
 
     def end_headers(self):
-        self.send_header("Cache-Control", "no-store")
+        # The vendored Slang compiler is 24 MB; re-reading it on every reload
+        # makes editor iteration miserable, so it is the one thing allowed to
+        # sit in the browser cache. Everything else stays no-store.
+        cache = "max-age=31536000, immutable" if self.path.endswith(".wasm") else "no-store"
+        self.send_header("Cache-Control", cache)
         super().end_headers()
 
     def do_POST(self):
