@@ -20,7 +20,7 @@
 // shader structs and the JS byte offsets always agree.
 
 import { defineBlock } from './gpu.js';
-import { LUT_ROW, lutRowV, LUT_SAMPLE_WGSL, LUT_SAMPLE_SLANG } from './curves.js';
+import { LUT_ROW, lutRowV, LUT_SAMPLE_SLANG } from './curves.js';
 
 // Render-target formats shared by the renderer (pass setup) and materials
 // (pipeline fragment targets). Living here avoids an import cycle.

@@ -103,21 +103,14 @@ export const LUT_ROWS = 3;
 /** Which row of the LUT holds which curve, plus the v coordinate that lands
  *  exactly on that row's texel centers. The vertex shader (size/color/alpha)
  *  and the compute sim (speed) both sample through these, so the row layout is
- *  defined once here instead of as magic numbers in two WGSL sources. */
+ *  defined once here instead of as magic numbers in two shader sources. */
 export const LUT_ROW = { color: 0, size: 1, speed: 2 };
 export const lutRowV = (row) => (row + 0.5) / LUT_ROWS;
 
-/** Shared WGSL: maps a particle's 0..1 life to the u that reads the texel
+/** Shared Slang: maps a particle's 0..1 life to the u that reads the texel
  *  baked for that t. Texel i holds t = i/(LUT_SIZE-1), so life01 has to land on
  *  texel centers — passing it as u straight would shift every lookup half a
  *  texel and make a curve read slightly early. */
-export const LUT_SAMPLE_WGSL = `
-fn ptLutU(life01: f32) -> f32 {
-  return (0.5 + saturate(life01) * ${LUT_SIZE - 1}.0) / ${LUT_SIZE}.0;
-}
-`;
-
-/** The same helper in Slang, for the user-facing material and sim preludes. */
 export const LUT_SAMPLE_SLANG = `
 float ptLutU(float life01) {
   return (0.5 + saturate(life01) * ${LUT_SIZE - 1}.0) / ${LUT_SIZE}.0;
