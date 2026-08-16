@@ -3,14 +3,30 @@
 
 const STORAGE_KEY = 'particletoy.library.v1';
 
-export function serializeState(effectName, emitters, materials, scene) {
-  return {
-    v: 1,
+// v2 marks the Slang cutover. v1 effects hold WGSL in vertexSrc/fragmentSrc/
+// simSrc and cannot be compiled by this engine — main.js detects them on load
+// and says so rather than showing a black canvas.
+export const SCHEMA_VERSION = 2;
+
+export function serializeState(effectName, emitters, materials, scene, wgslCache) {
+  const out = {
+    v: SCHEMA_VERSION,
+    shaderLang: 'slang',
     name: effectName,
     emitters: emitters.map((e) => structuredClone(e.p)),
     materials: materials.map((m) => structuredClone(m)),
     scene: structuredClone(scene),
   };
+  // Only where the bytes are free. Share links deliberately go without: they
+  // open in the editor, which has the compiler, and carrying compiled WGSL
+  // would bloat a ~2 KB link several-fold.
+  if (wgslCache) out.wgslCache = wgslCache;
+  return out;
+}
+
+/** True for effects saved before the Slang cutover, whose shaders are WGSL. */
+export function isPreSlang(data) {
+  return (data?.shaderLang ?? 'wgsl') !== 'slang';
 }
 
 function b64urlEncode(bytes) {

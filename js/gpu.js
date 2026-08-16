@@ -30,13 +30,16 @@ export async function createGPU(canvas) {
 // member offset = roundUp(alignOf(type), prevEnd); vec3 aligns to 16 but a
 // following f32 packs into its 4th lane. Arrays are vec4-only (stride 16).
 
+// `slang` is the type as written in Slang source. Matrices carry an explicit
+// column_major: Slang defaults to row-major storage, which would read the four
+// vec4s written here as rows and silently transpose every matrix.
 const TYPE_INFO = {
-  f32: { size: 4, align: 4, wgsl: 'f32' },
-  i32: { size: 4, align: 4, wgsl: 'i32' },
-  vec2: { size: 8, align: 8, wgsl: 'vec2f' },
-  vec3: { size: 12, align: 16, wgsl: 'vec3f' },
-  vec4: { size: 16, align: 16, wgsl: 'vec4f' },
-  mat4: { size: 64, align: 16, wgsl: 'mat4x4f' },
+  f32: { size: 4, align: 4, wgsl: 'f32', slang: 'float' },
+  i32: { size: 4, align: 4, wgsl: 'i32', slang: 'int' },
+  vec2: { size: 8, align: 8, wgsl: 'vec2f', slang: 'float2' },
+  vec3: { size: 12, align: 16, wgsl: 'vec3f', slang: 'float3' },
+  vec4: { size: 16, align: 16, wgsl: 'vec4f', slang: 'float4' },
+  mat4: { size: 64, align: 16, wgsl: 'mat4x4f', slang: 'column_major float4x4' },
 };
 
 const alignUp = (x, a) => Math.ceil(x / a) * a;
@@ -64,7 +67,15 @@ export function defineBlock(fields) {
       count !== undefined ? `  ${name}: array<vec4f, ${count}>,` : `  ${name}: ${TYPE_INFO[type].wgsl},`);
     return `struct ${structName} {\n${lines.join('\n')}\n}`;
   };
-  return { layout, size, wgslStruct, fields };
+  // Slang's std140/std430 rules agree with the WGSL rules `layout` was computed
+  // under (vec3 aligns to 16 with a following f32 packing into its 4th lane,
+  // vec4 arrays stride 16), so both emitters and the JS offsets stay in step.
+  const slangStruct = (structName) => {
+    const lines = fields.map(([name, type, count]) =>
+      count !== undefined ? `  float4 ${name}[${count}];` : `  ${TYPE_INFO[type].slang} ${name};`);
+    return `struct ${structName} {\n${lines.join('\n')}\n};`;
+  };
+  return { layout, size, wgslStruct, slangStruct, fields };
 }
 
 export class UniformBlock {
@@ -196,15 +207,40 @@ export const MESH_VERTEX_BUFFERS = [
   { arrayStride: 8, stepMode: 'vertex', attributes: [{ shaderLocation: 2, offset: 0, format: 'float32x2' }] },
 ];
 
-export const PARTICLE_VERTEX_BUFFERS = [
-  ...MESH_VERTEX_BUFFERS,
-  {
-    arrayStride: 64, stepMode: 'instance',
-    attributes: [
-      { shaderLocation: 3, offset: 0, format: 'float32x4' },  // pos + size
-      { shaderLocation: 4, offset: 16, format: 'float32x4' }, // color
-      { shaderLocation: 5, offset: 32, format: 'float32x4' }, // life seed rot free
-      { shaderLocation: 6, offset: 48, format: 'float32x4' }, // velocity
-    ],
-  },
-];
+// Particle materials can't use a fixed table: their vertex stage is compiled
+// from Slang, and Slang picks WGSL @location indices from HLSL semantics rather
+// than declaration order (POSITION lands on 0, but NORMAL on 5 and TEXCOORD0 on
+// 6). slangc.parseVertexLocations() reads the real indices back off the
+// generated code and they get threaded through here.
+//
+// Buffer *slot* order is unchanged and still matches the setVertexBuffer()
+// calls in the renderer — only shaderLocation moves.
+const PARTICLE_ATTRS = ['pos', 'normal', 'uv', 'iPosSize', 'iColor', 'iMisc', 'iVel'];
+
+export function particleVertexBuffers(loc) {
+  const at = (name) => {
+    const i = loc?.[name];
+    if (typeof i !== 'number') {
+      throw new Error(`vertex stage did not declare an input named '${name}' (got: ${Object.keys(loc || {}).join(', ') || 'none'})`);
+    }
+    return i;
+  };
+  // Unused inputs are stripped from the generated WGSL, and a layout that
+  // references a location the shader doesn't declare is a pipeline error — so
+  // the engine's VS entry point must consume all seven, which it does.
+  for (const name of PARTICLE_ATTRS) at(name);
+  return [
+    { arrayStride: 12, stepMode: 'vertex', attributes: [{ shaderLocation: at('pos'), offset: 0, format: 'float32x3' }] },
+    { arrayStride: 12, stepMode: 'vertex', attributes: [{ shaderLocation: at('normal'), offset: 0, format: 'float32x3' }] },
+    { arrayStride: 8, stepMode: 'vertex', attributes: [{ shaderLocation: at('uv'), offset: 0, format: 'float32x2' }] },
+    {
+      arrayStride: 64, stepMode: 'instance',
+      attributes: [
+        { shaderLocation: at('iPosSize'), offset: 0, format: 'float32x4' },  // xyz center, w base size
+        { shaderLocation: at('iColor'), offset: 16, format: 'float32x4' },   // start color RGBA
+        { shaderLocation: at('iMisc'), offset: 32, format: 'float32x4' },    // x life01, y seed, z rotation
+        { shaderLocation: at('iVel'), offset: 48, format: 'float32x4' },     // xyz velocity
+      ],
+    },
+  ];
+}

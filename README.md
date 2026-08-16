@@ -4,7 +4,9 @@ A [shadertoy](https://shadertoy.com)-inspired playground for **particle effects*
 game-engine-style particle editor with programmable PBR materials, two selectable graphics
 pipelines, and zero-infrastructure sharing.
 
-Built as a fully static web app: plain ES modules, WebGPU, no dependencies, no build step.
+Built as a fully static web app: plain ES modules, WebGPU, no build step. Shaders are
+written in [Slang](https://shader-slang.org) and compiled to WGSL in the browser by a
+vendored copy of the Slang compiler (`js/vendor/slang`, 24 MB — the app's one dependency).
 
 ## AI disclosure
 
@@ -24,6 +26,23 @@ python serve.py     # → http://localhost:8917
 Any static file server works (see the note about Windows MIME types in
 [setup.html](setup.html)). Requires WebGPU (current Chrome / Edge / Safari / Firefox).
 
+## Shaders are Slang
+
+Everything you write — vertex stage, fragment stage, compute sim — is
+[Slang](https://shader-slang.org), an HLSL-family language with generics, `inout`
+parameters and a real module system. The engine compiles it to WGSL in your browser, so
+it still runs natively on WebGPU; press **?** in the app for the full API reference and a
+crib sheet.
+
+The compiler is a 24 MB WebAssembly binary (9.75 MB over the wire). Only the editor loads
+it. The community pages render published effects from WGSL saved alongside them, so
+browsing and hover previews cost nothing extra.
+
+> **Effects published before the Slang cutover no longer render.** Their shaders are WGSL,
+> which this engine can't compile, and there is no WGSL → Slang translator. Opening one in
+> the editor still loads everything else — emitters, curves, materials, scene — and shows
+> the original source so it can be ported by hand.
+
 ## Features
 
 **Particle system** (per emitter, composable — an effect is any number of emitters):
@@ -39,15 +58,15 @@ Any static file server works (see the note about Windows MIME types in
 
 **Programmable GPU simulation** (the compute part):
 
-- Each emitter can switch from the property-driven sim to a **WGSL compute shader** you edit
+- Each emitter can switch from the property-driven sim to a **Slang compute shader** you edit
   live: `spawn()` initializes a particle, `simulate()` steps it — spawning budgets, slot
   recycling, dead-particle culling (indirect draws) and back-to-front sorting for alpha
   blending all run on the GPU, scaling to ~100k particles
-- **Convert to sim shader** seeds the editor with the exact WGSL that reproduces the
+- **Convert to sim shader** seeds the editor with the exact Slang that reproduces the
   property-editor behavior; every property keeps working through `sp.*` uniforms until you
   replace it
-- **Custom per-particle fields** (f32/vec2/vec3/vec4) — add state like a `home` anchor or a
-  `phase`, and it persists in the particle struct across frames
+- **Custom per-particle fields** (float/float2/float3/float4) — add state like a `home` anchor
+  or a `phase`, and it persists in the particle struct across frames
 - **`neighbors[]`** — a race-free, read-only snapshot of the whole particle array from last
   frame, so particles can react to *each other* (flocking, contact forces). See the
   **Boids (compute)** preset: 600 boids doing separation / alignment / cohesion entirely
@@ -55,7 +74,7 @@ Any static file server works (see the note about Windows MIME types in
 
 **Materials & shaders** (the shadertoy part):
 
-- Every material has a **programmable vertex and fragment stage** (WGSL) with live compilation,
+- Every material has a **programmable vertex and fragment stage** (Slang) with live compilation,
   inline error markers, and shadertoy-style behavior (broken code keeps the last good shader
   running)
 - The fragment stage fills a **PBR `Surface`** (albedo / metallic / roughness / normal /
@@ -65,8 +84,7 @@ Any static file server works (see the note about Windows MIME types in
 - Lit (PBR) or unlit shading, soft particles (depth fade), double-sided toggle
 - Built-in noise library (`hash11/21/33`, `noise2/3`, `fbm2/3`), frame uniforms
   (`u.time`, `u.resolution`, `u.mouse`, `u.cameraPos`) — press **?** in the app for the full
-  API reference. Legacy GLSL effects (old links, saves, gallery entries) are auto-converted
-  to WGSL on load
+  API reference
 
 **Two premade PBR pipelines**, switchable live from the toolbar:
 
@@ -128,7 +146,9 @@ Site: `index.html` / `browse.html` / `view.html` / `account.html` / `user.html` 
 (auth, particles, likes, comments, notifications, storage); `js/player.js` is the
 embeddable renderer used for the front page, hover previews, and view pages.
 Editor: `editor.html` + `js/main.js`, with `js/renderer.js` (both pipelines),
-`js/gpu.js` (WebGPU device + uniform-block/layout helpers), `js/shaderlib.js` (WGSL +
+`js/gpu.js` (WebGPU device + uniform-block/layout helpers), `js/shaderlib.js` (Slang +
 material API wrappers), `js/particles.js` (CPU simulation), `js/simlib.js` +
 `js/gpusim.js` (compute simulation: codegen, runtime, bitonic sort),
-`js/glsl2wgsl.js` (legacy shader migration), `js/ui.js` (inspector + editor panel).
+`js/slangc.js` (the Slang → WGSL compile service, sole owner of the wasm),
+`js/wgslcache.js` (compiled WGSL saved with each effect), `js/ui.js` (inspector +
+editor panel).

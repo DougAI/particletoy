@@ -1,14 +1,14 @@
-// Lightweight GLSL code editor: transparent textarea over a highlighted <pre>,
+// Lightweight Slang code editor: transparent textarea over a highlighted <pre>,
 // with line numbers, error markers, tab handling, and auto-indent.
 
 const TOKEN_RE = new RegExp(
   [
     '(\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)',                     // 1 comment
-    '(#[^\\n]*)',                                                  // 2 preprocessor
+    '(#[^\\n]*|\\[[A-Za-z_]\\w*(?:\\([^)]*\\))?\\])',              // 2 preprocessor / attribute
     '\\b(\\d+\\.\\d*(?:[eE][+-]?\\d+)?|\\.\\d+|\\d+)\\b',          // 3 number
-    '\\b(void|float|int|uint|bool|vec2|vec3|vec4|ivec2|ivec3|ivec4|mat2|mat3|mat4|if|else|for|while|return|in|out|inout|uniform|const|struct|break|continue|discard|true|false|precision|highp|mediump|lowp|sampler2D|layout)\\b', // 4 keyword
-    '\\b(mix|clamp|dot|cross|normalize|length|pow|exp|exp2|log|log2|sqrt|inversesqrt|sin|cos|tan|asin|acos|atan|abs|floor|ceil|fract|mod|min|max|step|smoothstep|texture|texelFetch|reflect|refract|distance|sign|dFdx|dFdy|fwidth|hash11|hash21|hash33|noise2|noise3|fbm2|fbm3)\\b', // 5 builtin
-    '\\b(Surface|SurfaceInput|Particle|VertexData|mainSurface|mainVertex|uTime|uResolution|uMouse|uCameraPos|iTime|iResolution|iMouse|PI|TAU)\\b', // 6 api
+    '\\b(void|bool|int|uint|half|float|double|float2|float3|float4|int2|int3|int4|uint2|uint3|uint4|bool2|bool3|bool4|float2x2|float3x3|float4x4|row_major|column_major|if|else|for|while|do|switch|case|default|return|in|out|inout|uniform|const|static|struct|class|interface|extension|typedef|namespace|import|export|break|continue|discard|true|false|let|var|nointerpolation|Atomic|ConstantBuffer|StructuredBuffer|RWStructuredBuffer|Texture2D|SamplerState)\\b', // 4 keyword
+    '\\b(lerp|clamp|saturate|dot|cross|normalize|length|pow|exp|exp2|log|log2|sqrt|rsqrt|sin|cos|tan|asin|acos|atan|atan2|abs|floor|ceil|frac|fmod|min|max|step|smoothstep|mul|transpose|reflect|refract|distance|sign|ddx|ddy|fwidth|SampleLevel|Load|hash11|hash21|hash33|noise2|noise3|fbm2|fbm3|rand|randRange|randUnitVec|curveSpeed|curveSize|curveColor|curveAlpha|screenUV|sceneDepth|sceneLinearDepth|sceneWorldPos|sampleGBuffer|gbufferAvailable|shadeSurface|skyColor|linearizeDepth)\\b', // 5 builtin
+    '\\b(Surface|SurfaceInput|Particle|VertexData|GBuffer|SpawnCtx|SimCtx|mainSurface|mainVertex|spawn|simulate|neighbors|PI|TAU)\\b', // 6 api
   ].join('|'),
   'g'
 );

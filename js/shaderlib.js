@@ -1,20 +1,26 @@
-// WGSL source library and shader builders.
+// Shader source library and builders.
 //
-// User-authored material code is wrapped shadertoy-style: the user writes
-//   fn mainVertex(v: ptr<function, VertexData>, p: Particle)     (vertex stage)
-//   fn mainSurface(s: ptr<function, Surface>, i: SurfaceInput)   (fragment stage)
-// and the engine wraps it with a prelude + entry point for each pipeline
+// User-authored material code is Slang, wrapped shadertoy-style: the user writes
+//   void mainVertex(inout VertexData v, Particle p)      (vertex stage)
+//   void mainSurface(inout Surface s, SurfaceInput i)    (fragment stage)
+// and the engine wraps it with a Slang prelude + entry point for each pipeline
 // variant:
 //   'gbuffer' — writes PBR surface data to MRT G-buffer (deferred, opaque/cutout)
 //   'forward' — full PBR lighting evaluated inline (forward pipeline, and
 //               blended particles in the deferred pipeline)
+// The whole module is then compiled to WGSL by js/slangc.js.
+//
+// The engine's own fullscreen and floor passes stay hand-written WGSL: they
+// never touch user code, so routing them through the compiler would only add
+// startup cost — and it would put the 24 MB wasm on the critical path for the
+// gallery pages, which must never load it.
 //
 // Uniform data reaches shaders through two uniform blocks whose layouts are
 // generated from the field lists below (see defineBlock in gpu.js), so the
-// WGSL structs and the JS byte offsets always agree.
+// shader structs and the JS byte offsets always agree.
 
 import { defineBlock } from './gpu.js';
-import { LUT_ROW, lutRowV, LUT_SAMPLE_WGSL } from './curves.js';
+import { LUT_ROW, lutRowV, LUT_SAMPLE_SLANG } from './curves.js';
 
 // Render-target formats shared by the renderer (pass setup) and materials
 // (pipeline fragment targets). Living here avoids an import cycle.
@@ -54,27 +60,48 @@ export const BRIGHT_FIELDS = [['threshold', 'f32']];
 export const BLUR_FIELDS = [['dir', 'vec2']];           // texel-space step
 export const POST_FIELDS = [['exposure', 'f32'], ['bloomIntensity', 'f32'], ['mode', 'i32']];
 
+// The WGSL frame binding is still used by the engine's own passes (sky,
+// deferred lighting, floor); the rest of the group-0 slots are declared only in
+// Slang now, since materials are the only thing that binds them.
 const FRAME_STRUCT = defineBlock(FRAME_FIELDS).wgslStruct('Frame');
-const DRAW_STRUCT = defineBlock(DRAW_FIELDS).wgslStruct('DrawParams');
 
 const FRAME_BINDING = `${FRAME_STRUCT}
 @group(0) @binding(0) var<uniform> u: Frame;
 `;
 
-const DRAW_BINDING = `${DRAW_STRUCT}
-@group(0) @binding(1) var<uniform> ptDraw: DrawParams;
+// ---------------------------------------------------------------- Slang bindings
+//
+// Same group-0 slots as the WGSL blocks above. Slang honours [[vk::binding]]
+// exactly, so the bind group layouts in renderer.js are untouched.
+//
+// One type does shift: the depth texture is Texture2D<float>, which Slang emits
+// as texture_2d<f32> rather than WGSL's texture_depth_2d. HLSL has no distinct
+// depth-texture type and Slang offers no way to ask for one, so the forward
+// bind group layout declares binding 4 as 'unfilterable-float' instead of
+// 'depth' (both are legal sample types for depth32float, and the material only
+// ever textureLoad()s it — no comparison sampling).
+
+const FRAME_SLANG = defineBlock(FRAME_FIELDS).slangStruct('Frame');
+const DRAW_SLANG = defineBlock(DRAW_FIELDS).slangStruct('DrawParams');
+
+const FRAME_BINDING_SLANG = `${FRAME_SLANG}
+[[vk::binding(0, 0)]] ConstantBuffer<Frame> u;
 `;
 
-const LUT_BINDINGS = `
-@group(0) @binding(2) var ptSamp: sampler;
-@group(0) @binding(3) var ptLut: texture_2d<f32>;
-${LUT_SAMPLE_WGSL}`;
+const DRAW_BINDING_SLANG = `${DRAW_SLANG}
+[[vk::binding(1, 0)]] ConstantBuffer<DrawParams> ptDraw;
+`;
 
-const SCENE_READ_BINDINGS = `
-@group(0) @binding(4) var ptDepth: texture_depth_2d;
-@group(0) @binding(5) var ptGBufA: texture_2d<f32>;
-@group(0) @binding(6) var ptGBufB: texture_2d<f32>;
-@group(0) @binding(7) var ptGBufC: texture_2d<f32>;
+const LUT_BINDINGS_SLANG = `
+[[vk::binding(2, 0)]] SamplerState ptSamp;
+[[vk::binding(3, 0)]] Texture2D<float4> ptLut;
+${LUT_SAMPLE_SLANG}`;
+
+const SCENE_READ_BINDINGS_SLANG = `
+[[vk::binding(4, 0)]] Texture2D<float> ptDepth;
+[[vk::binding(5, 0)]] Texture2D<float4> ptGBufA;
+[[vk::binding(6, 0)]] Texture2D<float4> ptGBufB;
+[[vk::binding(7, 0)]] Texture2D<float4> ptGBufC;
 `;
 
 // ---------------------------------------------------------------- noise / util
@@ -130,40 +157,98 @@ fn fbm3(p0: vec3f) -> f32 {
 }
 `;
 
-// ---------------------------------------------------------------- structs
-const STRUCTS_WGSL = `
+// The same library in Slang. Kept deliberately close to the WGSL above so the
+// two read as translations of each other: hash constants, octave count and the
+// 2.03/17.1 lacunarity are all load-bearing for visual parity with saved
+// effects, and drifting them would silently change every noise-based material.
+export const NOISE_SLANG = `
+static const float PI = 3.14159265359;
+static const float TAU = 6.28318530718;
+
+// GLSL-style mod (floor, not trunc). HLSL's fmod truncates, so this shadows it.
+float fmod(float x, float y) { return x - y * floor(x / y); }
+float3 fmod3(float3 x, float y) { return x - y * floor(x / y); }
+
+float hash11(float p0) { float p = frac(p0 * 0.1031); p *= p + 33.33; p *= p + p; return frac(p); }
+float hash21(float2 p) {
+  float3 p3 = frac(float3(p.x, p.y, p.x) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return frac((p3.x + p3.y) * p3.z);
+}
+float3 hash33(float3 p0) {
+  float3 p = frac(p0 * float3(0.1031, 0.1030, 0.0973));
+  p += dot(p, p.yxz + 33.33);
+  return frac((p.xxy + p.yxx) * p.zyx);
+}
+float noise2(float2 p) {
+  float2 i = floor(p); float2 f = frac(p);
+  float2 uu = f * f * (3.0 - 2.0 * f);
+  return lerp(lerp(hash21(i), hash21(i + float2(1.0, 0.0)), uu.x),
+              lerp(hash21(i + float2(0.0, 1.0)), hash21(i + float2(1.0, 1.0)), uu.x), uu.y);
+}
+float noise3(float3 p) {
+  float3 i = floor(p); float3 f = frac(p);
+  float3 uu = f * f * (3.0 - 2.0 * f);
+  float2 o = float2(37.0, 239.0);
+  float n000 = hash21(i.xy + o * i.z);
+  float n100 = hash21(i.xy + float2(1.0, 0.0) + o * i.z);
+  float n010 = hash21(i.xy + float2(0.0, 1.0) + o * i.z);
+  float n110 = hash21(i.xy + float2(1.0, 1.0) + o * i.z);
+  float n001 = hash21(i.xy + o * (i.z + 1.0));
+  float n101 = hash21(i.xy + float2(1.0, 0.0) + o * (i.z + 1.0));
+  float n011 = hash21(i.xy + float2(0.0, 1.0) + o * (i.z + 1.0));
+  float n111 = hash21(i.xy + float2(1.0, 1.0) + o * (i.z + 1.0));
+  return lerp(lerp(lerp(n000, n100, uu.x), lerp(n010, n110, uu.x), uu.y),
+              lerp(lerp(n001, n101, uu.x), lerp(n011, n111, uu.x), uu.y), uu.z);
+}
+float fbm2(float2 p0) {
+  float v = 0.0; float a = 0.5; float2 p = p0;
+  for (int i = 0; i < 4; i++) { v += a * noise2(p); p = p * 2.03 + 17.1; a *= 0.5; }
+  return v;
+}
+float fbm3(float3 p0) {
+  float v = 0.0; float a = 0.5; float3 p = p0;
+  for (int i = 0; i < 4; i++) { v += a * noise3(p); p = p * 2.03 + 17.1; a *= 0.5; }
+  return v;
+}
+`;
+
+
+// The user-facing struct API in Slang. Field names and meanings are identical
+// to the WGSL above — these are what Help (?) documents.
+const STRUCTS_SLANG = `
 struct Particle {
-  center: vec3f,    // particle center, world space
-  velocity: vec3f,  // world-space velocity
-  color: vec4f,     // start color * color/alpha-over-life
-  size: f32,        // size after size-over-life
-  rotation: f32,    // radians
-  life: f32,        // normalized age 0..1
-  seed: f32,        // stable per-particle random 0..1
-}
+  float3 center;    // particle center, world space
+  float3 velocity;  // world-space velocity
+  float4 color;     // start color * color/alpha-over-life
+  float size;       // size after size-over-life
+  float rotation;   // radians
+  float life;       // normalized age 0..1
+  float seed;       // stable per-particle random 0..1
+};
 struct VertexData {
-  positionWS: vec3f,
-  normalWS: vec3f,
-  uv: vec2f,
-}
+  float3 positionWS;
+  float3 normalWS;
+  float2 uv;
+};
 struct Surface {
-  albedo: vec3f,
-  metallic: f32,
-  roughness: f32,
-  normal: vec3f,    // world space
-  emissive: vec3f,  // HDR, added after lighting
-  occlusion: f32,
-  alpha: f32,
-}
+  float3 albedo;
+  float metallic;
+  float roughness;
+  float3 normal;    // world space
+  float3 emissive;  // HDR, added after lighting
+  float occlusion;
+  float alpha;
+};
 struct SurfaceInput {
-  uv: vec2f,
-  color: vec4f,
-  life: f32,
-  seed: f32,
-  positionWS: vec3f,
-  normalWS: vec3f,
-  viewDirWS: vec3f, // surface -> camera
-}
+  float2 uv;
+  float4 color;
+  float life;
+  float seed;
+  float3 positionWS;
+  float3 normalWS;
+  float3 viewDirWS; // surface -> camera
+};
 `;
 
 // ---------------------------------------------------------------- lighting
@@ -235,12 +320,95 @@ fn shadeSurface(P: vec3f, N: vec3f, V: vec3f, albedo: vec3f, metallic: f32, roug
 }
 `;
 
+// The same lighting model in Slang, for forward-lit user materials.
+//
+// KEEP IN SYNC WITH PBR_WGSL ABOVE. The engine's own passes (the deferred
+// lighting pass and the forward floor) are hand-written WGSL and use that copy;
+// forward-lit particles are compiled from Slang and use this one. If the two
+// drift, particles stop matching the floor they sit on. Any change to the BRDF,
+// the ambient term or the sky model has to land in both.
+export const PBR_SLANG = `
+float3 skyColor(float3 d) {
+  float t = clamp(d.y * 0.5 + 0.5, 0.0, 1.0);
+  float3 c = lerp(u.skyBottom, u.skyTop, pow(t, 0.75));
+  float s = max(dot(normalize(d), normalize(u.sunDir)), 0.0);
+  c += u.sunColor * 0.06 * pow(s, 64.0);
+  return c;
+}
+float D_GGX(float NoH, float a) {
+  float a2 = a * a;
+  float d = NoH * NoH * (a2 - 1.0) + 1.0;
+  return a2 / (PI * d * d + 1e-7);
+}
+float G_SmithApprox(float NoV, float NoL, float a) {
+  float k = a * 0.5 + 1e-4;
+  float gv = NoV / (NoV * (1.0 - k) + k);
+  float gl2 = NoL / (NoL * (1.0 - k) + k);
+  return gv * gl2;
+}
+// Every Fresnel base is saturated before pow(): pow() of a negative base is
+// NaN, and dot() of two unit vectors routinely lands an ulp above 1.0 — which
+// happens constantly on camera-facing billboards, where the normal and the
+// view vector are the same vector by construction. An unguarded 1.0 - NoV then
+// poisons the whole fragment (NaN * 0 is still NaN, so even a zero-weighted
+// specular term propagates it), and bloom smears it across the screen.
+float3 F_Schlick(float3 F0, float VoH) { return F0 + (1.0 - F0) * pow(saturate(1.0 - VoH), 5.0); }
+
+float3 directBRDF(float3 N, float3 V, float3 L, float3 F0, float3 diffuse, float a) {
+  // V == -L would make normalize() return NaN; fall back to N (NoL is 0 there).
+  float3 VpL = V + L;
+  float3 H = dot(VpL, VpL) < 1e-12 ? N : normalize(VpL);
+  float NoL = saturate(dot(N, L));
+  float NoV = clamp(dot(N, V), 1e-4, 1.0);
+  float NoH = saturate(dot(N, H));
+  float VoH = saturate(dot(V, H));
+  float D = D_GGX(NoH, a);
+  float G = G_SmithApprox(NoV, NoL, a);
+  float3 F = F_Schlick(F0, VoH);
+  float3 spec = D * G * F / (4.0 * NoV * max(NoL, 1e-4) + 1e-4);
+  return (diffuse / PI + spec) * NoL;
+}
+
+float3 shadeSurface(float3 P, float3 N, float3 V, float3 albedo, float metallic, float roughness, float ao) {
+  float3 F0 = lerp(float3(0.04), albedo, metallic);
+  float3 diffuseColor = albedo * (1.0 - metallic);
+  float a = max(roughness * roughness, 0.002);
+  float3 col = float3(0.0);
+  col += directBRDF(N, V, normalize(u.sunDir), F0, diffuseColor, a) * u.sunColor;
+  for (int i = 0; i < 4; i++) {
+    if (i >= u.numPoints) { break; }
+    float3 Ld = u.pointPos[i].xyz - P;
+    float dist = length(Ld);
+    float3 L = Ld / max(dist, 1e-4);
+    float atten = 1.0 / (1.0 + dist * dist * 0.35);
+    col += directBRDF(N, V, L, F0, diffuseColor, a) * u.pointColor[i].xyz * atten;
+  }
+  // Hemisphere ambient diffuse + fake environment specular from the sky model
+  float3 amb = lerp(u.skyBottom, u.skyTop, N.y * 0.5 + 0.5) * u.ambient;
+  col += diffuseColor * amb * ao;
+  float3 R = reflect(-V, N);
+  float NoV = saturate(dot(N, V));
+  float3 F = F0 + (max(float3(1.0 - roughness), F0) - F0) * pow(1.0 - NoV, 5.0);
+  float3 envSpec = lerp(skyColor(R), (u.skyTop + u.skyBottom) * 0.5, roughness) * u.ambient;
+  col += envSpec * F * (1.0 - roughness * 0.8) * ao;
+  return col;
+}
+`;
+
 const DEPTH_UTIL = `
 fn linearizeDepth(d: f32) -> f32 {
   let n = u.nearFar.x; let f = u.nearFar.y;
   return n * f / (f - d * (f - n));
 }
 fn uvToNdc(uv: vec2f) -> vec2f { return vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0); }
+`;
+
+const DEPTH_UTIL_SLANG = `
+float linearizeDepth(float d) {
+  float n = u.nearFar.x; float f = u.nearFar.y;
+  return n * f / (f - d * (f - n));
+}
+float2 uvToNdc(float2 uv) { return float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0); }
 `;
 
 // ---------------------------------------------------------------- G-buffer reads
@@ -255,45 +423,49 @@ fn uvToNdc(uv: vec2f) -> vec2f { return vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0
 // read it) or under the forward pipeline (which has no G-buffer at all). In
 // those cases gbufferAvailable() is false and the material channels read as
 // neutral defaults. Depth is available in the forward pipeline too.
-const GBUFFER_STRUCT = `
+
+
+
+// ---- the same G-buffer API in Slang
+const GBUFFER_STRUCT_SLANG = `
 struct GBuffer {
-  albedo: vec3f,
-  metallic: f32,
-  normal: vec3f,      // world space
-  roughness: f32,
-  emissive: vec3f,
-  occlusion: f32,
-  depth: f32,         // raw 0..1 (1.0 = nothing drawn / sky)
-  linearDepth: f32,   // world units from the camera
-  positionWS: vec3f,  // reconstructed world position
-  valid: bool,        // false on sky, or when no G-buffer is bound
-}
-var<private> ptFragCoord: vec4f;
-fn screenUV() -> vec2f { return ptFragCoord.xy / u.resolution; }
+  float3 albedo;
+  float metallic;
+  float3 normal;      // world space
+  float roughness;
+  float3 emissive;
+  float occlusion;
+  float depth;        // raw 0..1 (1.0 = nothing drawn / sky)
+  float linearDepth;  // world units from the camera
+  float3 positionWS;  // reconstructed world position
+  bool valid;         // false on sky, or when no G-buffer is bound
+};
+static float4 ptFragCoord;
+float2 screenUV() { return ptFragCoord.xy / u.resolution; }
 `;
 
-const GBUFFER_READ = GBUFFER_STRUCT + `
-fn ptTexel(uv: vec2f) -> vec2i {
-  return vec2i(clamp(uv, vec2f(0.0), vec2f(1.0)) * (u.resolution - 1.0));
+const GBUFFER_READ_SLANG = GBUFFER_STRUCT_SLANG + `
+int2 ptTexel(float2 uv) {
+  return int2(clamp(uv, float2(0.0), float2(1.0)) * (u.resolution - 1.0));
 }
-fn gbufferAvailable() -> bool { return ptDraw.hasGBuffer > 0.5; }
-fn sceneDepth(uv: vec2f) -> f32 { return textureLoad(ptDepth, ptTexel(uv), 0); }
-fn sceneLinearDepth(uv: vec2f) -> f32 { return linearizeDepth(sceneDepth(uv)); }
-fn sceneWorldPos(uv: vec2f) -> vec3f {
-  let d = sceneDepth(uv);
-  let wp = u.invViewProj * vec4f(uvToNdc(uv), d, 1.0);
+bool gbufferAvailable() { return ptDraw.hasGBuffer > 0.5; }
+float sceneDepth(float2 uv) { return ptDepth.Load(int3(ptTexel(uv), 0)); }
+float sceneLinearDepth(float2 uv) { return linearizeDepth(sceneDepth(uv)); }
+float3 sceneWorldPos(float2 uv) {
+  float d = sceneDepth(uv);
+  float4 wp = mul(u.invViewProj, float4(uvToNdc(uv), d, 1.0));
   return wp.xyz / wp.w;
 }
-fn sampleGBuffer(uv: vec2f) -> GBuffer {
-  var g: GBuffer;
-  let d = sceneDepth(uv);
+GBuffer sampleGBuffer(float2 uv) {
+  GBuffer g;
+  float d = sceneDepth(uv);
   g.depth = d;
   g.linearDepth = linearizeDepth(d);
   g.positionWS = sceneWorldPos(uv);
   if (ptDraw.hasGBuffer > 0.5) {
-    let a = textureLoad(ptGBufA, ptTexel(uv), 0);
-    let b = textureLoad(ptGBufB, ptTexel(uv), 0);
-    let c = textureLoad(ptGBufC, ptTexel(uv), 0);
+    float4 a = ptGBufA.Load(int3(ptTexel(uv), 0));
+    float4 b = ptGBufB.Load(int3(ptTexel(uv), 0));
+    float4 c = ptGBufC.Load(int3(ptTexel(uv), 0));
     g.albedo = a.rgb;
     g.metallic = a.a;
     g.normal = normalize(b.rgb * 2.0 - 1.0);
@@ -302,11 +474,11 @@ fn sampleGBuffer(uv: vec2f) -> GBuffer {
     g.occlusion = c.a;
     g.valid = d < 1.0;
   } else {
-    g.albedo = vec3f(0.0);
+    g.albedo = float3(0.0);
     g.metallic = 0.0;
-    g.normal = vec3f(0.0, 1.0, 0.0);
+    g.normal = float3(0.0, 1.0, 0.0);
     g.roughness = 1.0;
-    g.emissive = vec3f(0.0);
+    g.emissive = float3(0.0);
     g.occlusion = 1.0;
     g.valid = false;
   }
@@ -316,77 +488,98 @@ fn sampleGBuffer(uv: vec2f) -> GBuffer {
 
 // Inert version for the G-buffer variant: same signatures, no texture reads,
 // so a material that reads the scene still compiles when drawn as opaque.
-const GBUFFER_STUB = GBUFFER_STRUCT + `
-fn gbufferAvailable() -> bool { return false; }
-fn sceneDepth(uv: vec2f) -> f32 { return 1.0; }
-fn sceneLinearDepth(uv: vec2f) -> f32 { return 0.0; }
-fn sceneWorldPos(uv: vec2f) -> vec3f { return vec3f(0.0); }
-fn sampleGBuffer(uv: vec2f) -> GBuffer {
-  var g: GBuffer;
-  g.albedo = vec3f(0.0);
+const GBUFFER_STUB_SLANG = GBUFFER_STRUCT_SLANG + `
+bool gbufferAvailable() { return false; }
+float sceneDepth(float2 uv) { return 1.0; }
+float sceneLinearDepth(float2 uv) { return 0.0; }
+float3 sceneWorldPos(float2 uv) { return float3(0.0); }
+GBuffer sampleGBuffer(float2 uv) {
+  GBuffer g;
+  g.albedo = float3(0.0);
   g.metallic = 0.0;
-  g.normal = vec3f(0.0, 1.0, 0.0);
+  g.normal = float3(0.0, 1.0, 0.0);
   g.roughness = 1.0;
-  g.emissive = vec3f(0.0);
+  g.emissive = float3(0.0);
   g.occlusion = 1.0;
   g.depth = 1.0;
   g.linearDepth = 0.0;
-  g.positionWS = vec3f(0.0);
+  g.positionWS = float3(0.0);
   g.valid = false;
   return g;
 }
 `;
 
-// ---------------------------------------------------------------- particle VS
-const PARTICLE_VS_MAIN = `
-struct VSIn {
-  @location(0) pos: vec3f,
-  @location(1) normal: vec3f,
-  @location(2) uv: vec2f,
-  @location(3) iPosSize: vec4f,  // xyz center, w base size
-  @location(4) iColor: vec4f,    // start color RGBA
-  @location(5) iMisc: vec4f,     // x life01, y seed, z rotation, w free
-  @location(6) iVel: vec4f,      // xyz velocity
-}
-struct VSOut {
-  @builtin(position) clip: vec4f,
-  @location(0) uv: vec2f,
-  @location(1) color: vec4f,
-  @location(2) life: f32,
-  @location(3) seed: f32,
-  @location(4) worldPos: vec3f,
-  @location(5) normalWS: vec3f,
-}
 
-@vertex fn vsMain(vin: VSIn) -> VSOut {
-  let life = vin.iMisc.x;
-  let seed = vin.iMisc.y;
-  let rot = vin.iMisc.z;
+// The Slang vertex entry point.
+//
+// VSIn field *names* matter: slangc.parseVertexLocations() reads them back off
+// the generated WGSL to build the pipeline's vertex buffer layout, since Slang
+// assigns @location from the HLSL semantics rather than declaration order. All
+// seven inputs must stay referenced — Slang strips unused ones, and a layout
+// pointing at a location the shader never declared is a pipeline error.
+// The varying struct is shared: the vertex stage returns it and the fragment
+// stage takes it as input, matched by semantic. Both modules need the
+// declaration, but only the vertex module carries the entry point below (which
+// calls mainVertex, and so cannot be compiled into a fragment module).
+const VS_OUT_SLANG = `
+struct VSOut {
+  float4 clip : SV_Position;
+  float2 uv : UV;
+  float4 color : COLOR0;
+  float life : LIFE;
+  float seed : SEED;
+  float3 worldPos : WORLDPOS;
+  float3 normalWS : NORMALWS;
+};
+`;
+
+const PARTICLE_VS_MAIN_SLANG = VS_OUT_SLANG + `
+struct VSIn {
+  float3 pos : POSITION;
+  float3 normal : NORMAL;
+  float2 uv : TEXCOORD0;
+  float4 iPosSize : TEXCOORD1;  // xyz center, w base size
+  float4 iColor : TEXCOORD2;    // start color RGBA
+  float4 iMisc : TEXCOORD3;     // x life01, y seed, z rotation, w free
+  float4 iVel : TEXCOORD4;      // xyz velocity
+};
+
+[shader("vertex")]
+VSOut vsMain(VSIn vin) {
+  float life = vin.iMisc.x;
+  float seed = vin.iMisc.y;
+  float rot = vin.iMisc.z;
   // Over-lifetime curves are applied here, after the sim (CPU or compute) has
   // produced the particle's start color and base size.
-  let lutU = ptLutU(life);
-  let lifeColor = textureSampleLevel(ptLut, ptSamp, vec2f(lutU, ${lutRowV(LUT_ROW.color)}), 0.0);
-  let sizeMul = textureSampleLevel(ptLut, ptSamp, vec2f(lutU, ${lutRowV(LUT_ROW.size)}), 0.0).r;
-  let size = vin.iPosSize.w * sizeMul;
-  let centerWS = vin.iPosSize.xyz;
+  float lutU = ptLutU(life);
+  float4 lifeColor = ptLut.SampleLevel(ptSamp, float2(lutU, ${lutRowV(LUT_ROW.color)}), 0);
+  float sizeMul = ptLut.SampleLevel(ptSamp, float2(lutU, ${lutRowV(LUT_ROW.size)}), 0).r;
+  float size = vin.iPosSize.w * sizeMul;
+  float3 centerWS = vin.iPosSize.xyz;
 
-  var v: VertexData;
+  VertexData v;
   if (ptDraw.meshMode == 0) {
-    let right = vec3f(u.view[0][0], u.view[1][0], u.view[2][0]);
-    let up = vec3f(u.view[0][1], u.view[1][1], u.view[2][1]);
-    let c = cos(rot); let s = sin(rot);
-    let p2 = vec2f(vin.pos.x * c - vin.pos.y * s, vin.pos.x * s + vin.pos.y * c) * size;
+    // Rows 0 and 1 of the view matrix are the camera's right and up axes.
+    // HLSL's M[i] is the i-th row whatever the storage order, so this is the
+    // same pair the WGSL engine passes read out column-wise.
+    float3 right = u.view[0].xyz;
+    float3 up = u.view[1].xyz;
+    float c = cos(rot); float s = sin(rot);
+    float2 p2 = float2(vin.pos.x * c - vin.pos.y * s, vin.pos.x * s + vin.pos.y * c) * size;
     v.positionWS = centerWS + right * p2.x + up * p2.y;
     v.normalWS = normalize(u.cameraPos - centerWS);
   } else {
-    let c = cos(rot); let s = sin(rot);
-    let R = mat3x3f(vec3f(c, 0.0, -s), vec3f(0.0, 1.0, 0.0), vec3f(s, 0.0, c));
-    v.positionWS = centerWS + R * (vin.pos * size);
-    v.normalWS = R * vin.normal;
+    float c = cos(rot); float s = sin(rot);
+    // Written row-wise here; the WGSL form lists the same matrix column-wise.
+    float3x3 R = float3x3(c, 0.0, s,
+                          0.0, 1.0, 0.0,
+                          -s, 0.0, c);
+    v.positionWS = centerWS + mul(R, vin.pos * size);
+    v.normalWS = mul(R, vin.normal);
   }
   v.uv = vin.uv;
 
-  var p: Particle;
+  Particle p;
   p.center = centerWS;
   p.velocity = vin.iVel.xyz;
   p.color = vin.iColor * lifeColor;
@@ -395,16 +588,16 @@ struct VSOut {
   p.life = life;
   p.seed = seed;
 
-  mainVertex(&v, p);
+  mainVertex(v, p);
 
-  var o: VSOut;
+  VSOut o;
   o.uv = v.uv;
   o.color = p.color;
   o.life = life;
   o.seed = seed;
   o.worldPos = v.positionWS;
   o.normalWS = v.normalWS;
-  o.clip = u.proj * u.view * vec4f(v.positionWS, 1.0);
+  o.clip = mul(u.proj, mul(u.view, float4(v.positionWS, 1.0)));
   return o;
 }
 `;
@@ -417,28 +610,21 @@ function countLines(s) {
 
 /** Vertex module is variant-independent: compiled once per material. */
 export function buildParticleVS(userCode) {
-  const prelude = FRAME_BINDING + DRAW_BINDING + LUT_BINDINGS + NOISE_WGSL + STRUCTS_WGSL;
-  const src = prelude + userCode + '\n' + PARTICLE_VS_MAIN;
+  const prelude = FRAME_BINDING_SLANG + DRAW_BINDING_SLANG + LUT_BINDINGS_SLANG + NOISE_SLANG + STRUCTS_SLANG;
+  const src = prelude + userCode + '\n' + PARTICLE_VS_MAIN_SLANG;
   return { src, lineOffset: countLines(prelude) };
 }
 
 // ---------------------------------------------------------------- particle FS
-const FS_IN = `
-struct FSIn {
-  @builtin(position) fragPos: vec4f,
-  @builtin(front_facing) ff: bool,
-  @location(0) uv: vec2f,
-  @location(1) color: vec4f,
-  @location(2) life: f32,
-  @location(3) seed: f32,
-  @location(4) worldPos: vec3f,
-  @location(5) normalWS: vec3f,
-}
-`;
+//
+// VSOut doubles as the fragment input: Slang matches the stages by semantic,
+// and lifts the SV_Position member out to @builtin(position) on its own. It
+// must NOT also be declared as a separate fragment parameter — that emits two
+// @builtin(position) params, which is invalid WGSL.
 
-const FS_SURFACE_SETUP = `
-  ptFragCoord = fin.fragPos;
-  var si: SurfaceInput;
+const FS_SURFACE_SETUP_SLANG = `
+  ptFragCoord = fin.clip;
+  SurfaceInput si;
   si.uv = fin.uv;
   si.color = fin.color;
   si.life = fin.life;
@@ -446,69 +632,72 @@ const FS_SURFACE_SETUP = `
   si.positionWS = fin.worldPos;
   si.normalWS = normalize(fin.normalWS);
   si.viewDirWS = normalize(u.cameraPos - fin.worldPos);
-  var s: Surface;
+  Surface s;
   s.albedo = si.color.rgb;
   s.metallic = 0.0;
   s.roughness = 0.5;
   s.normal = si.normalWS;
-  s.emissive = vec3f(0.0);
+  s.emissive = float3(0.0);
   s.occlusion = 1.0;
   s.alpha = si.color.a;
-  mainSurface(&s, si);
-  let N = normalize(select(-s.normal, s.normal, fin.ff));
+  mainSurface(s, si);
+  float3 N = normalize(ff ? s.normal : -s.normal);
 `;
 
-const FS_GBUFFER_MAIN = FS_IN + `
+const FS_GBUFFER_MAIN_SLANG = `
 struct GBufOut {
-  @location(0) albedoMetal: vec4f,
-  @location(1) normalRough: vec4f,
-  @location(2) emissiveAO: vec4f,
-}
-@fragment fn fsMain(fin: FSIn) -> GBufOut {
-${FS_SURFACE_SETUP}
+  float4 albedoMetal : SV_Target0;
+  float4 normalRough : SV_Target1;
+  float4 emissiveAO : SV_Target2;
+};
+
+[shader("fragment")]
+GBufOut fsMain(VSOut fin, bool ff : SV_IsFrontFace) {
+${FS_SURFACE_SETUP_SLANG}
   if (BLENDMODE == 1) {
     if (s.alpha < ptDraw.alphaCutoff) { discard; }
   }
-  var o: GBufOut;
+  GBufOut o;
   if (SHADING_LIT) {
-    o.albedoMetal = vec4f(s.albedo, s.metallic);
-    o.normalRough = vec4f(N * 0.5 + 0.5, clamp(s.roughness, 0.03, 1.0));
-    o.emissiveAO = vec4f(s.emissive, s.occlusion);
+    o.albedoMetal = float4(s.albedo, s.metallic);
+    o.normalRough = float4(N * 0.5 + 0.5, clamp(s.roughness, 0.03, 1.0));
+    o.emissiveAO = float4(s.emissive, s.occlusion);
   } else {
-    o.albedoMetal = vec4f(0.0);
-    o.normalRough = vec4f(N * 0.5 + 0.5, 1.0);
-    o.emissiveAO = vec4f(s.albedo + s.emissive, s.occlusion);
+    o.albedoMetal = float4(0.0);
+    o.normalRough = float4(N * 0.5 + 0.5, 1.0);
+    o.emissiveAO = float4(s.albedo + s.emissive, s.occlusion);
   }
   return o;
 }
 `;
 
-const FS_FORWARD_MAIN = FS_IN + `
-@fragment fn fsMain(fin: FSIn) -> @location(0) vec4f {
-${FS_SURFACE_SETUP}
+const FS_FORWARD_MAIN_SLANG = `
+[shader("fragment")]
+float4 fsMain(VSOut fin, bool ff : SV_IsFrontFace) : SV_Target {
+${FS_SURFACE_SETUP_SLANG}
   if (BLENDMODE == 1) {
     if (s.alpha < ptDraw.alphaCutoff) { discard; }
   }
-  var fade = 1.0;
+  float fade = 1.0;
   if (SOFT_PARTICLES) {
-    let sceneD = textureLoad(ptDepth, vec2i(fin.fragPos.xy), 0);
-    let sceneZ = linearizeDepth(sceneD);
-    let fragZ = linearizeDepth(fin.fragPos.z);
+    float sceneD = ptDepth.Load(int3(int2(fin.clip.xy), 0));
+    float sceneZ = linearizeDepth(sceneD);
+    float fragZ = linearizeDepth(fin.clip.z);
     fade = clamp((sceneZ - fragZ) / max(ptDraw.softDistance, 1e-4), 0.0, 1.0);
   }
-  var col: vec3f;
+  float3 col;
   if (SHADING_LIT) {
     col = shadeSurface(si.positionWS, N, si.viewDirWS, s.albedo, s.metallic, clamp(s.roughness, 0.03, 1.0), s.occlusion) + s.emissive;
   } else {
     col = s.albedo + s.emissive;
   }
-  let alpha = clamp(s.alpha * fade, 0.0, 1.0);
+  float alpha = clamp(s.alpha * fade, 0.0, 1.0);
   if (BLENDMODE == 3) {
-    return vec4f(col * alpha, 0.0);   // additive (one, one)
+    return float4(col * alpha, 0.0);  // additive (one, one)
   } else if (BLENDMODE == 2) {
-    return vec4f(col, alpha);         // alpha blend
+    return float4(col, alpha);        // alpha blend
   }
-  return vec4f(col, 1.0);             // opaque / cutout
+  return float4(col, 1.0);            // opaque / cutout
 }
 `;
 
@@ -516,16 +705,16 @@ const BLENDMODE_INDEX = { opaque: 0, cutout: 1, blend: 2, add: 3 };
 
 export function buildParticleFS(userCode, variant, opts) {
   const consts =
-    `const BLENDMODE: i32 = ${BLENDMODE_INDEX[opts.blendMode] ?? 0};\n` +
-    `const SHADING_LIT: bool = ${opts.lit ? 'true' : 'false'};\n` +
-    `const SOFT_PARTICLES: bool = ${opts.soft && variant === 'forward' ? 'true' : 'false'};\n`;
-  let prelude = consts + FRAME_BINDING + DRAW_BINDING + LUT_BINDINGS;
+    `static const int BLENDMODE = ${BLENDMODE_INDEX[opts.blendMode] ?? 0};\n` +
+    `static const bool SHADING_LIT = ${opts.lit ? 'true' : 'false'};\n` +
+    `static const bool SOFT_PARTICLES = ${opts.soft && variant === 'forward' ? 'true' : 'false'};\n`;
+  let prelude = consts + FRAME_BINDING_SLANG + DRAW_BINDING_SLANG + LUT_BINDINGS_SLANG;
   if (variant === 'forward') {
-    prelude += SCENE_READ_BINDINGS + NOISE_WGSL + STRUCTS_WGSL + PBR_WGSL + DEPTH_UTIL + GBUFFER_READ;
+    prelude += SCENE_READ_BINDINGS_SLANG + NOISE_SLANG + STRUCTS_SLANG + PBR_SLANG + DEPTH_UTIL_SLANG + GBUFFER_READ_SLANG;
   } else {
-    prelude += NOISE_WGSL + STRUCTS_WGSL + DEPTH_UTIL + GBUFFER_STUB;
+    prelude += NOISE_SLANG + STRUCTS_SLANG + DEPTH_UTIL_SLANG + GBUFFER_STUB_SLANG;
   }
-  const main = variant === 'gbuffer' ? FS_GBUFFER_MAIN : FS_FORWARD_MAIN;
+  const main = VS_OUT_SLANG + (variant === 'gbuffer' ? FS_GBUFFER_MAIN_SLANG : FS_FORWARD_MAIN_SLANG);
   return { src: prelude + userCode + '\n' + main, lineOffset: countLines(prelude) };
 }
 
@@ -711,24 +900,24 @@ export const FLOOR_FORWARD_WGSL = FLOOR_COMMON + PBR_WGSL + `
 `;
 
 // ---------------------------------------------------------------- templates
-export const DEFAULT_VS = `// Vertex stage — runs for every vertex of every particle (WGSL).
+export const DEFAULT_VS = `// Vertex stage — runs for every vertex of every particle (Slang).
 // Modify v.positionWS / v.normalWS / v.uv. See Help (?) for the full API.
 
-fn mainVertex(v: ptr<function, VertexData>, p: Particle) {
+void mainVertex(inout VertexData v, Particle p) {
   // Example: stretch along velocity
   // v.positionWS += p.velocity * 0.05 * (v.uv.y - 0.5);
 }
 `;
 
-export const DEFAULT_FS = `// Fragment stage — fill in the PBR Surface (WGSL). See Help (?) for the API.
+export const DEFAULT_FS = `// Fragment stage — fill in the PBR Surface (Slang). See Help (?) for the API.
 // i.color already includes color-over-life and alpha-over-life.
 
-fn mainSurface(s: ptr<function, Surface>, i: SurfaceInput) {
-  let d = length(i.uv - 0.5) * 2.0;   // soft round sprite
+void mainSurface(inout Surface s, SurfaceInput i) {
+  float d = length(i.uv - 0.5) * 2.0;   // soft round sprite
   s.albedo = i.color.rgb;
   s.roughness = 0.6;
   s.metallic = 0.0;
-  s.emissive = vec3f(0.0);
-  s.alpha = i.color.a * smoothstep(1.0, 0.55, d);
+  s.emissive = float3(0.0);
+  s.alpha = i.color.a * (1.0 - smoothstep(0.55, 1.0, d));
 }
 `;

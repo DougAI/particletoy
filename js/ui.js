@@ -6,6 +6,7 @@ import { CodeEditor } from './editor.js';
 import { defaultEmitterParams, MAX_CAPACITY } from './particles.js';
 import { makeMaterial } from './materials.js';
 import { PROPS_SIM_SRC, FIELD_TYPES } from './simlib.js';
+import { slangReady, loadSlang } from './slangc.js';
 
 // ---------------------------------------------------------------- primitives
 
@@ -186,7 +187,7 @@ export function modal(title, contentNode, { wide } = {}) {
 }
 
 let toastTimer = null;
-export function toast(msg) {
+export function toast(msg, ms = 2600) {
   let t = document.getElementById('toast');
   if (!t) {
     t = el('div');
@@ -196,7 +197,7 @@ export function toast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
 
 // ---------------------------------------------------------------- inspector
@@ -539,6 +540,7 @@ export class EditorPanel {
   show(materialId, tab = 'fs') {
     // save pending edits of the previous buffer first
     this._commitBuffer();
+    this._warmCompiler();
     this.materialId = materialId;
     this.tab = tab;
     const m = this.app.materials.find((x) => x.id === materialId);
@@ -631,11 +633,35 @@ export class EditorPanel {
     this._showErrors(errors);
   }
 
+  /**
+   * Starts the compiler download as soon as the editor is opened, rather than
+   * waiting for the first edit. It is a 24 MB fetch; overlapping it with the
+   * user reading their shader is most of the perceived latency gone.
+   * Re-renders the status when it lands, so "loading…" doesn't sit there
+   * after the compiler is ready but nothing has recompiled yet.
+   */
+  _warmCompiler() {
+    if (slangReady() || this._warming) return;
+    this._warming = true;
+    loadSlang()
+      .then(() => { if (this.errorsEl.dataset.state === 'loading') this._showErrors(this._lastErrors ?? []); })
+      .catch(() => {});
+  }
+
   _showErrors(errors) {
+    this._lastErrors = errors;
     const stage = this.tab === 'vs' ? 'vertex' : this.tab === 'sim' ? 'sim' : 'fragment';
     this.editor.setErrors(errors.filter((e) => e.stage === stage));
     this.errorsEl.innerHTML = '';
+    this.errorsEl.dataset.state = '';
     if (!errors.length) {
+      // Before the compiler lands nothing has been compiled yet, so "✓ compiled"
+      // would be a lie — and a silent several-second wait looks like a hang.
+      if (!slangReady()) {
+        this.errorsEl.dataset.state = 'loading';
+        this.errorsEl.appendChild(el('div', 'compile-ok', 'loading the Slang compiler…'));
+        return;
+      }
       this.errorsEl.appendChild(el('div', 'compile-ok', '✓ compiled'));
       return;
     }
@@ -655,39 +681,40 @@ export function showHelp() {
 const HELP_HTML = `
 <div class="help">
 <p>Materials have a <b>programmable vertex and fragment stage</b> written in
-<b>WGSL</b> (the WebGPU shading language), wrapped shadertoy-style. The engine
-handles instancing, billboarding, curves and lighting — you write two small functions.
-The first parameter is a pointer: write through it directly (<code>s.albedo = ...</code>).</p>
+<b>Slang</b>, wrapped shadertoy-style. The engine handles instancing, billboarding,
+curves and lighting — you write two small functions. Slang compiles to WGSL in your
+browser, so everything still runs natively on WebGPU. The first parameter is
+<code>inout</code>: write through it directly (<code>s.albedo = ...</code>).</p>
 
 <h3>Vertex stage</h3>
-<pre>fn mainVertex(v: ptr&lt;function, VertexData&gt;, p: Particle)</pre>
-<pre>struct VertexData { positionWS: vec3f, normalWS: vec3f, uv: vec2f }
+<pre>void mainVertex(inout VertexData v, Particle p)</pre>
+<pre>struct VertexData { float3 positionWS; float3 normalWS; float2 uv; }
 struct Particle {
-  center: vec3f,    // particle center (world)
-  velocity: vec3f,  // world-space velocity
-  color: vec4f,     // start color × color/alpha-over-life
-  size: f32,        // after size-over-life
-  rotation: f32,    // radians
-  life: f32,        // normalized 0..1
-  seed: f32,        // stable per-particle random 0..1
+  float3 center;    // particle center (world)
+  float3 velocity;  // world-space velocity
+  float4 color;     // start color × color/alpha-over-life
+  float size;       // after size-over-life
+  float rotation;   // radians
+  float life;       // normalized 0..1
+  float seed;       // stable per-particle random 0..1
 }</pre>
 <p>Example — stretch billboards along velocity:</p>
 <pre>v.positionWS += p.velocity * 0.06 * (v.uv.y - 0.5) * 2.0;</pre>
 
 <h3>Fragment stage — PBR surface</h3>
-<pre>fn mainSurface(s: ptr&lt;function, Surface&gt;, i: SurfaceInput)</pre>
+<pre>void mainSurface(inout Surface s, SurfaceInput i)</pre>
 <pre>struct Surface {
-  albedo: vec3f,    // base color
-  metallic: f32,    // 0..1
-  roughness: f32,   // 0..1
-  normal: vec3f,    // world space (defaults to geometric normal)
-  emissive: vec3f,  // HDR glow, added after lighting (drives bloom)
-  occlusion: f32,   // ambient occlusion 0..1
-  alpha: f32,
+  float3 albedo;    // base color
+  float metallic;   // 0..1
+  float roughness;  // 0..1
+  float3 normal;    // world space (defaults to geometric normal)
+  float3 emissive;  // HDR glow, added after lighting (drives bloom)
+  float occlusion;  // ambient occlusion 0..1
+  float alpha;
 }
 struct SurfaceInput {
-  uv: vec2f,  color: vec4f,  life: f32,  seed: f32,
-  positionWS: vec3f,  normalWS: vec3f,  viewDirWS: vec3f,
+  float2 uv;  float4 color;  float life;  float seed;
+  float3 positionWS;  float3 normalWS;  float3 viewDirWS;
 }</pre>
 <p>In the <b>Deferred</b> pipeline, opaque/cutout surfaces are written to the G-buffer and lit
 in a fullscreen pass; blended particles are forward-lit. In the <b>Forward</b> pipeline
@@ -698,29 +725,29 @@ everything is lit inline. Unlit materials skip lighting: output = albedo + emiss
 <b>Deferred</b> pipeline the blended pass runs after the G-buffer and lighting passes,
 so the whole G-buffer is readable — this is what makes refraction, distortion and
 scene-aware tinting possible.</p>
-<pre>fn screenUV() -> vec2f           // this fragment's screen UV, 0..1
-fn gbufferAvailable() -> bool    // true only in Deferred, on a blended material
-fn sampleGBuffer(uv: vec2f) -> GBuffer
+<pre>float2 screenUV()          // this fragment's screen UV, 0..1
+bool gbufferAvailable()    // true only in Deferred, on a blended material
+GBuffer sampleGBuffer(float2 uv)
 
-fn sceneDepth(uv: vec2f) -> f32        // raw 0..1 (1.0 = sky / nothing)
-fn sceneLinearDepth(uv: vec2f) -> f32  // world units from the camera
-fn sceneWorldPos(uv: vec2f) -> vec3f   // reconstructed world position</pre>
+float sceneDepth(float2 uv)        // raw 0..1 (1.0 = sky / nothing)
+float sceneLinearDepth(float2 uv)  // world units from the camera
+float3 sceneWorldPos(float2 uv)    // reconstructed world position</pre>
 <pre>struct GBuffer {
-  albedo: vec3f,     metallic: f32,
-  normal: vec3f,     roughness: f32,   // normal is world space
-  emissive: vec3f,   occlusion: f32,
-  depth: f32,        linearDepth: f32,
-  positionWS: vec3f,
-  valid: bool,       // false on sky, or when no G-buffer is bound
+  float3 albedo;     float metallic;
+  float3 normal;     float roughness;   // normal is world space
+  float3 emissive;   float occlusion;
+  float depth;       float linearDepth;
+  float3 positionWS;
+  bool valid;        // false on sky, or when no G-buffer is bound
 }</pre>
 <p>Example — refract the scene behind an additive/blended particle:</p>
-<pre>let uv = screenUV();
-let offset = i.normalWS.xy * 0.03 * i.color.a;
-let g = sampleGBuffer(uv + offset);
+<pre>float2 uv = screenUV();
+float2 offset = i.normalWS.xy * 0.03 * i.color.a;
+GBuffer g = sampleGBuffer(uv + offset);
 s.emissive = g.albedo * 2.0;      // pick up what's behind
 s.alpha = i.color.a;</pre>
 <p>Example — fade out where the particle meets solid geometry:</p>
-<pre>let d = sceneLinearDepth(screenUV()) - distance(u.cameraPos, i.positionWS);
+<pre>float d = sceneLinearDepth(screenUV()) - distance(u.cameraPos, i.positionWS);
 s.alpha *= clamp(d / 0.4, 0.0, 1.0);</pre>
 <p class="muted">The same functions exist in every variant so a material never fails to
 compile, but an <b>opaque</b> surface is what <i>writes</i> the G-buffer and so cannot read
@@ -734,24 +761,24 @@ if your effect must survive a pipeline switch.</p>
 shader</b> sim (GPU) that scales to ~100k particles. You write two hooks; the
 engine handles spawning budgets, slot recycling, culling dead particles and
 (for alpha-blend) depth sorting — all on the GPU:</p>
-<pre>fn spawn(p: ptr&lt;function, Particle&gt;, ctx: SpawnCtx)     // initialize a particle
-fn simulate(p: ptr&lt;function, Particle&gt;, ctx: SimCtx)    // step it each frame</pre>
+<pre>void spawn(inout Particle p, SpawnCtx ctx)     // initialize a particle
+void simulate(inout Particle p, SimCtx ctx)    // step it each frame</pre>
 <pre>struct Particle {
-  position: vec3f,  age: f32,
-  velocity: vec3f,  lifetime: f32,   // spawn() must set lifetime
-  color: vec4f,
-  seed: f32,  size: f32,  rotation: f32,  rotVel: f32,
+  float3 position;  float age;
+  float3 velocity;  float lifetime;   // spawn() must set lifetime
+  float4 color;
+  float seed;  float size;  float rotation;  float rotVel;
   // ...plus any custom fields you add in the Simulation section
 }
-struct SpawnCtx { index: u32, emitterPos: vec3f, time: f32 }
-struct SimCtx   { index: u32, dt: f32, time: f32 }</pre>
-<pre>rand() -> f32                   // fresh 0..1 each call, deterministic per particle
-randRange(lo, hi) -> f32
-randUnitVec() -> vec3f
-curveSpeed(life01) -> f32       // the Speed/life curve — apply this yourself
-curveSize(life01)  -> f32       // Size/life  ┐ already applied at draw time;
-curveColor(life01) -> vec3f     // Color/life ├ read them, don't re-multiply
-curveAlpha(life01) -> f32       // Alpha/life ┘
+struct SpawnCtx { uint index; float3 emitterPos; float time; }
+struct SimCtx   { uint index; float dt; float time; }</pre>
+<pre>float rand()                    // fresh 0..1 each call, deterministic per particle
+float randRange(lo, hi)
+float3 randUnitVec()
+float curveSpeed(life01)        // the Speed/life curve — apply this yourself
+float curveSize(life01)         // Size/life  ┐ already applied at draw time;
+float3 curveColor(life01)       // Color/life ├ read them, don't re-multiply
+float curveAlpha(life01)        // Alpha/life ┘
 sp.*                            // every emitter property as a uniform:
    emitterPos gravity drag boxSize colorA colorB speedRange lifetimeRange
    sizeRange rotationRange rotSpeedRange spread shapeRadius shapeAngle
@@ -777,20 +804,20 @@ engine copies it aside first (and only when your code actually mentions
 <pre>neighbors[j]          // a Particle; j in 0 .. sp.capacity-1
 neighbors[j].lifetime &lt;= 0.0   // empty slot — skip it</pre>
 <pre>// separation / alignment / cohesion over the neighbourhood
-for (var j = 0u; j &lt; u32(sp.capacity); j++) {
+for (uint j = 0u; j &lt; uint(sp.capacity); j++) {
   if (j == ctx.index) { continue; }
-  let other = neighbors[j];
+  Particle other = neighbors[j];
   if (other.lifetime &lt;= 0.0) { continue; }
-  let delta = other.position - p.position;
+  float3 delta = other.position - p.position;
   ...
 }</pre>
 <p class="muted">That loop is O(n²) — fine for a few hundred particles, but cap the
-scan (<code>min(u32(sp.capacity), 1024u)</code>) so raising <b>Max particles</b> can't
+scan (<code>min(uint(sp.capacity), 1024u)</code>) so raising <b>Max particles</b> can't
 lock the GPU. See the <b>Boids (compute)</b> preset for a complete example.</p>
-<p>"Convert to sim shader" seeds the editor with the exact WGSL that reproduces
+<p>"Convert to sim shader" seeds the editor with the exact Slang that reproduces
 the property-editor behavior — sliders keep working through <code>sp.*</code>
-until you replace them. Custom fields (e.g. a <code>home: vec3f</code> anchor or
-a <code>phase: f32</code>) persist per particle across frames.</p>
+until you replace them. Custom fields (e.g. a <code>float3 home</code> anchor or
+a <code>float phase</code>) persist per particle across frames.</p>
 
 <h3>Built-in uniforms (struct <code>u</code>)</h3>
 <pre>u.time          effect time, seconds
@@ -802,13 +829,24 @@ u.cameraPos     world-space camera position</pre>
 <pre>hash11(f) hash21(v2) hash33(v3)   // fast hashes → 0..1
 noise2(v2) noise3(v3)             // value noise
 fbm2(v2) fbm3(v3)                 // 4-octave fbm
-fmod(x, y) fmod3(v3, y)           // GLSL-style floor mod
+fmod(x, y) fmod3(v3, y)           // GLSL-style floor mod (HLSL's fmod truncates)
 PI, TAU</pre>
 
-<h3>WGSL crib sheet (coming from GLSL)</h3>
-<pre>vec3(...)  →  vec3f(...)          float x = 1.0;  →  let x = 1.0;   (or var)
-mix / clamp: min/max args must match the vector type: clamp(v, vec3f(0.0), vec3f(1.0))
-mod(x, y)  →  fmod(x, y)          statements need no forward declarations</pre>
+<h3>Slang crib sheet</h3>
+<p>Slang is HLSL-shaped, so if you know GLSL or C the syntax is familiar. The names
+that differ from GLSL/WGSL:</p>
+<pre>vec3   →  float3            mix    →  lerp
+ivec3  →  int3              fract  →  frac
+mat4   →  float4x4          mod    →  fmod
+M * v  →  mul(M, v)         inversesqrt →  rsqrt
+                            clamp(x,0,1) →  saturate(x)</pre>
+<pre>float x = 1.0;              // plain declarations; no let/var needed
+inout Surface s             // write s.albedo directly, no pointers
+tex.SampleLevel(samp, uv, 0)   // methods on the texture, not free functions</pre>
+<p class="muted">Unlike WGSL, a bare local is <i>not</i> zero-initialised — write
+<code>Particle p = (Particle)0;</code> if you need that. Scalars widen to vectors
+freely (<code>float3 v = 1.0;</code>), and <code>clamp</code>/<code>min</code>/
+<code>max</code> take scalars against vectors without a cast.</p>
 
 <h3>Tips</h3>
 <ul>
@@ -816,6 +854,6 @@ mod(x, y)  →  fmod(x, y)          statements need no forward declarations</pre
 <li>Use <code>s.emissive</code> with values &gt; 1 for glow — bloom picks it up.</li>
 <li><code>i.color</code> already includes the color-over-life gradient and alpha-over-life curve.</li>
 <li>Vary per particle with <code>i.seed</code> (e.g. <code>fbm2(uv + i.seed * 19.0)</code>).</li>
-<li>Additive materials: alpha scales brightness; albedo is usually vec3f(0.0).</li>
+<li>Additive materials: alpha scales brightness; albedo is usually float3(0.0).</li>
 </ul>
 </div>`;
