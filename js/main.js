@@ -612,7 +612,11 @@ function showExportMedia() {
     cancelBtn.classList.remove('hidden');
     progWrap.classList.remove('hidden');
     progFill.style.width = '0%';
-    progText.textContent = 'Rendering… 0%';
+    // Setup — a second device, the shader compiles, the compute sims warming
+    // up — runs before the first frame, and on a compute-heavy effect it is
+    // long enough that a stuck "Rendering… 0%" would read as a hang. The first
+    // onProgress call overwrites this.
+    progText.textContent = 'Preparing…';
 
     const onProgress = (p) => {
       progFill.style.width = `${Math.round(Math.min(1, p) * 100)}%`;
@@ -621,8 +625,14 @@ function showExportMedia() {
     cancelBtn.addEventListener('click', () => { signal.cancelled = true; }, { once: true });
 
     try {
+      // withCache: the export renders on its own device through EffectPlayer,
+      // which builds its pipelines from the WGSL travelling with the effect.
+      // Handing it what the editor already compiled keeps every shader out of
+      // Slang on the way to the first frame; without it the export falls back
+      // to recompiling all of them from source.
       const result = await (format === 'video' ? exportVideo : exportGif)({
-        data: currentData(), camera, w, h, fps, seconds, pipeline: app.pipeline, onProgress, signal,
+        data: currentData({ withCache: true }),
+        camera, w, h, fps, seconds, pipeline: app.pipeline, onProgress, signal,
       });
       if (!result) {
         toast('Export cancelled');
