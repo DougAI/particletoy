@@ -86,20 +86,31 @@ function fmtCount(n: number): string {
   return String(n);
 }
 
-async function fetchParticle(id: string): Promise<Particle | null> {
+/** Also reports how the lookup went, because "no row" has several very
+ *  different causes — wrong key, RLS hiding a private particle, a bad id — and
+ *  the card alone can't tell them apart. See ?debug=1. */
+async function fetchParticle(id: string): Promise<{ row: Particle | null; status: number; note: string }> {
   const url = `${SUPABASE_URL}/rest/v1/particles?id=eq.${id}&select=${encodeURIComponent(SELECT)}`;
   const res = await fetch(url, {
     headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
   });
   if (!res.ok) {
+    const body = await res.text();
     // Shows up in the function's dashboard logs. A 401 here means the anon key
-    // didn't work — see PT_ANON_KEY above. Everything below still degrades to
-    // the generic site card rather than erroring at the crawler.
-    console.error(`particle lookup failed: ${res.status} ${await res.text()}`);
-    return null;
+    // didn't work — see PT_ANON_KEY above.
+    console.error(`particle lookup failed: ${res.status} ${body}`);
+    return { row: null, status: res.status, note: `REST said ${res.status}: ${body.slice(0, 200)}` };
   }
   const rows = await res.json();
-  return rows?.[0] ?? null;
+  if (!rows?.length) {
+    return {
+      row: null,
+      status: res.status,
+      note: 'no row — either no particle has that id, or it is private '
+        + '(this reads the database as `anon`, so row-level security hides it)',
+    };
+  }
+  return { row: rows[0], status: res.status, note: 'ok' };
 }
 
 function meta(tags: Array<[string, string | number | null | undefined]>): string {
@@ -226,6 +237,10 @@ function particleCard(p: Particle): string {
       ['twitter:card', 'summary_large_image'],
       ['twitter:image', isGif ? p.preview_url : poster],
     );
+    // Sizing the GIF stops the card being laid out for the 640×360 thumbnail
+    // it isn't. (Whether it animates is up to the reader: Discord shows frame
+    // one, Slack and Telegram play it.)
+    if (isGif) tags.push(['og:image:width', vw], ['og:image:height', vh]);
   }
 
   tags.push(['twitter:title', title], ['twitter:description', description]);
@@ -249,20 +264,49 @@ Deno.serve(async (req: Request) => {
     'access-control-allow-origin': '*',
   };
 
-  if (!id) return new Response(siteCard(), { status: 404, headers });
+  // Always 200 on the card paths. A crawler is not a browser: Discord renders
+  // no embed at all for a non-2xx, so answering a private or unknown particle
+  // with 404 turns every lookup problem into the same silent nothing. The
+  // generic site card is a far better answer — the link still previews, and
+  // seeing the generic one instead of the particle's says where to look.
+  if (!id) return new Response(siteCard(), { status: 200, headers });
 
-  let p: Particle | null = null;
+  let found: { row: Particle | null; status: number; note: string };
   try {
-    p = await fetchParticle(id);
-  } catch { /* fall through to the generic card */ }
+    found = await fetchParticle(id);
+  } catch (ex) {
+    found = { row: null, status: 0, note: `lookup threw: ${(ex as Error).message}` };
+  }
+
+  // ?debug=1 — what the endpoint saw, in the order worth checking. No secrets:
+  // the key is reported as present/absent, never echoed.
+  if (url.searchParams.has('debug')) {
+    return Response.json({
+      id,
+      particleFound: Boolean(found.row),
+      restStatus: found.status,
+      note: found.note,
+      cardWouldShow: !found.row ? 'the generic particletoy card'
+        : found.row.preview_type?.startsWith('video/') ? `a playing clip (${found.row.preview_type})`
+        : found.row.preview_type === 'image/gif' ? 'a GIF (first frame only in Discord)'
+        : found.row.thumb_url ? 'the still thumbnail — no preview clip rendered yet'
+        : 'the generic card image — this particle has no thumbnail either',
+      title: found.row?.title ?? null,
+      anonKeySet: Boolean(ANON_KEY),
+      usingPtAnonKey: Boolean(Deno.env.get('PT_ANON_KEY')),
+      siteUrl: SITE_URL,
+      youLookLikeACrawler: isCrawler,
+      userAgent: ua,
+    }, { headers: { 'cache-control': 'no-store', 'access-control-allow-origin': '*' } });
+  }
 
   if (!isCrawler) {
-    // Humans never see this page. Unknown ids still go to view.html, which
+    // Humans never see the card. Unknown ids still go to view.html, which
     // shows its own "doesn't exist, or it's private" state.
     const to = `${SITE_URL}/view.html?id=${encodeURIComponent(id)}`;
     return new Response(null, { status: 302, headers: { location: to, 'cache-control': 'no-store' } });
   }
 
-  if (!p) return new Response(siteCard(), { status: 404, headers });
-  return new Response(particleCard(p), { status: 200, headers });
+  if (!found.row) return new Response(siteCard(), { status: 200, headers });
+  return new Response(particleCard(found.row), { status: 200, headers });
 });

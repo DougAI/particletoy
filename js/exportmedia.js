@@ -252,9 +252,11 @@ export async function exportGif(opts) {
 // H.264 clip lands around a megabyte.
 
 const PREVIEW_VIDEO = { w: 960, h: 540, fps: 30, seconds: 3.5, preroll: 1.5, bitrate: 2_500_000 };
-// The last resort, when no video codec works out. GIF is far heavier per
-// second of motion, so it gets a smaller frame and a slower shutter.
-const PREVIEW_GIF = { w: 400, h: 225, fps: 10, seconds: 3, preroll: 1.5 };
+// The fallback when no video codec works out, and what you get if you ask for
+// GIF outright. Lower and slower than the video because GIF costs far more per
+// second of motion — though less than you would think for this subject:
+// particles on black quantize well, and these settings measure ~0.7 MB.
+const PREVIEW_GIF = { w: 640, h: 360, fps: 12, seconds: 3, preroll: 1.5 };
 
 // Storage matches the bucket's mime whitelist against the Content-Type header
 // verbatim, and "video/mp4;codecs=h264" is not "video/mp4" to it. .slice()
@@ -276,32 +278,38 @@ function packClip(result, spec, fallbackType) {
 }
 
 /** Renders the short looping clip used for link previews.
- *  @param opts { data, camera, pipeline, allowCompile, onProgress, signal }
+ *  @param opts { data, camera, pipeline, allowCompile, format, onProgress, signal }
  *    allowCompile defaults to false: this one runs from the view page as well
  *    as the editor, and a gallery page must never fetch the Slang compiler.
  *    The editor's publish flow passes true.
+ *    format 'auto' (default) records video and falls back to GIF; 'gif' skips
+ *    video entirely. Worth knowing before choosing: Discord plays an MP4 given
+ *    to it as og:video, but shows only the first frame of a GIF given as
+ *    og:image — so 'gif' trades away the motion that most people are after.
  *  @returns { blob, type, ext, w, h } — or null if cancelled. */
 export async function capturePreviewClip(opts) {
-  const { data, camera, pipeline = 'deferred', allowCompile = false, onProgress, signal } = opts;
+  const {
+    data, camera, pipeline = 'deferred', allowCompile = false,
+    format = 'auto', onProgress, signal,
+  } = opts;
+  const common = { data, camera, pipeline, allowCompile, onProgress, signal };
 
-  // Walk the list rather than taking the first "yes": a codec can pass
-  // isTypeSupported and still record nothing, and the fallbacks are only
-  // worth anything if a lie about the preferred one doesn't end the attempt.
-  const candidates = PREVIEW_CODECS.filter((t) => getVideoMimeType([t]));
-  for (const mimeType of candidates) {
-    try {
-      const result = await exportVideo({
-        data, camera, pipeline, allowCompile, ...PREVIEW_VIDEO, mimeType, onProgress, signal,
-      });
-      if (!result) return null;                      // cancelled
-      return packClip(result, PREVIEW_VIDEO, mimeType);
-    } catch (ex) {
-      console.warn(`preview clip: ${mimeType} didn't work out —`, ex.message);
+  if (format !== 'gif') {
+    // Walk the list rather than taking the first "yes": a codec can pass
+    // isTypeSupported and still record nothing, and the fallbacks are only
+    // worth anything if a lie about the preferred one doesn't end the attempt.
+    const candidates = PREVIEW_CODECS.filter((t) => getVideoMimeType([t]));
+    for (const mimeType of candidates) {
+      try {
+        const result = await exportVideo({ ...common, ...PREVIEW_VIDEO, mimeType });
+        if (!result) return null;                    // cancelled
+        return packClip(result, PREVIEW_VIDEO, mimeType);
+      } catch (ex) {
+        console.warn(`preview clip: ${mimeType} didn't work out —`, ex.message);
+      }
     }
   }
 
-  const gif = await exportGif({
-    data, camera, pipeline, allowCompile, ...PREVIEW_GIF, onProgress, signal,
-  });
+  const gif = await exportGif({ ...common, ...PREVIEW_GIF });
   return gif ? packClip(gif, PREVIEW_GIF, 'image/gif') : null;
 }
