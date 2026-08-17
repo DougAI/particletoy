@@ -219,6 +219,12 @@ supabase functions deploy og</code></pre>
   types <code>image/jpeg, image/png, image/webp, image/gif, video/mp4,
   video/webm</code>.</p>
 
+  <p class="muted"><b>The function is not part of the static site.</b> Pushing to the
+  branch GitHub Pages serves updates the pages, and nothing else — the edge function
+  keeps running the code you last deployed until you run
+  <code>supabase functions deploy og</code> again. Worth remembering when a fix to
+  <code>index.ts</code> appears to have changed nothing.</p>
+
   <h3>Checking it</h3>
   <p><code>?debug=1</code> answers "why is my card wrong" in one request — whether the
   particle was found, what the database said, and what the card will show:</p>

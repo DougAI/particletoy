@@ -78,12 +78,17 @@ function ok(name, cond, extra = '') {
   ]) ok(`has ${tag.slice(0, 52)}…`, html.includes(tag), `\n  got:\n${html}`);
 
   ok('title carries author', html.includes('Campfire &lt;script&gt; — by Doug &amp; Co'));
-  // The only <script> in the page must be the redirect the template writes;
-  // nothing from the database may show up unescaped.
+  // Nothing from the database may show up unescaped, and the page carries no
+  // script of its own any more.
   ok('escapes user text everywhere',
-     !html.includes('Campfire <script>') && html.match(/<script>/g).length === 1,
-     '\n' + html);
+     !html.includes('Campfire <script>') && !/<script/i.test(html), '\n' + html);
   ok('stats in description', html.includes('♥ 42') && html.includes('👁 1.2k'));
+  // A crawler is the only reader of this page; telling it the page moved
+  // sends it to view.html and its generic tags instead.
+  ok('no meta-refresh for crawlers', !/http-equiv=["']?refresh/i.test(html), '\n' + html);
+  ok('no redirect script for crawlers', !html.includes('location.replace'), '\n' + html);
+  ok('no raw newline inside an attribute',
+     !/content="[^"]*\n/.test(html) && html.includes('&#10;'), '\n' + html);
 }
 
 // ── 2. A GIF preview becomes the image, not a video ────────────────────────

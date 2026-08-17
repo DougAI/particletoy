@@ -165,7 +165,12 @@ function meta(tags: Array<[string, string | number | null | undefined]>): string
     .map(([k, v]) => {
       // Open Graph uses property=, Twitter and friends use name=.
       const attr = k.startsWith('og:') ? 'property' : 'name';
-      return `  <meta ${attr}="${k}" content="${esc(v)}">`;
+      // A raw newline inside an attribute is legal HTML, and the description
+      // deliberately carries two. Entity-encode them anyway: parsers that read
+      // meta tags with a regex rather than a real parser are common, and a
+      // line break mid-attribute is exactly what trips them.
+      const content = esc(v).replace(/\r?\n/g, '&#10;');
+      return `  <meta ${attr}="${k}" content="${content}">`;
     })
     .join('\n');
 }
@@ -174,6 +179,12 @@ function page(
   { title, description, canonical, tags }:
   { title: string; description: string; canonical: string; tags: string },
 ): string {
+  // No meta-refresh and no redirect script, deliberately. A browser never
+  // reaches this page — it gets a 302 several lines below — so a crawler is
+  // the only thing that ever reads this HTML, and telling a crawler the page
+  // has moved is the last thing we want: it re-crawls view.html, whose tags
+  // are the generic site ones, and some drop the embed rather than follow.
+  // The plain link is for a human running ?card=1 to inspect the tags.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -181,7 +192,6 @@ function page(
 <title>${esc(title)}</title>
 <link rel="canonical" href="${esc(canonical)}">
 ${tags}
-<meta http-equiv="refresh" content="0; url=${esc(canonical)}">
 <style>
   body { background:#0d0e11; color:#d7dae0; font:15px/1.6 -apple-system,"Segoe UI",system-ui,sans-serif;
          display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
@@ -189,8 +199,7 @@ ${tags}
 </style>
 </head>
 <body>
-<p>Opening <a href="${esc(canonical)}">${esc(title)}</a>…</p>
-<script>location.replace(${JSON.stringify(canonical)});</script>
+<p><a href="${esc(canonical)}">${esc(title)}</a></p>
 </body>
 </html>
 `;
