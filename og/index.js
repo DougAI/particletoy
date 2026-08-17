@@ -27,14 +27,10 @@
 // by mislabelling the response; it is an anti-phishing control. Supabase's Pro
 // plan with the Edge Functions custom domain add-on lifts the restriction.
 //
-// Configuration — environment variables, set in your host's dashboard:
-//
-//   SUPABASE_URL      https://<your-ref>.supabase.co   (required)
-//   PT_ANON_KEY       your publishable/anon key        (required)
-//   SITE_URL          where the static site lives      (optional)
-//
-// The first two are the same values as the top of js/backend.js. On Supabase
-// they are injected automatically; everywhere else set them by hand.
+// Configuration: none required. The constants below mirror js/backend.js and
+// work as-is; environment variables (SUPABASE_URL, PT_ANON_KEY, SITE_URL)
+// override them, which is how a fork points at its own project without
+// editing the file. ?debug=1 reports which of the two it is using.
 //
 // Then point js/backend.js's SHARE_BASE at wherever this ends up. Anything
 // answering <base>/<particle-id> with these tags will do.
@@ -42,6 +38,21 @@
 // Reads the database as `anon`, so row-level security applies and private
 // particles stay invisible — the same rules the website itself plays by.
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ─── project constants (the same two as the top of js/backend.js) ───────────
+// Baked in rather than required as configuration, for the same reason they sit
+// in js/backend.js in the clear: the publishable key is designed to be public,
+// and row-level security is what limits what it can do — this endpoint reads
+// as `anon`, exactly like a signed-out visitor. Making them mandatory
+// environment variables bought no secrecy and cost a setup step that, when
+// missed, silently degrades every card to the generic one.
+//
+// Change these for your own project, or set SUPABASE_URL / PT_ANON_KEY in your
+// host's dashboard to override without editing the file.
+const SUPABASE_URL = 'https://kqbbghyfpxxowwhdtjnj.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_JsVww6ububer-Yi-s0AG4A_0Di7CjOh';
+const SITE_URL = 'https://dougai.github.io/particletoy';
+// ────────────────────────────────────────────────────────────────────────────
 
 const BRAND_COLOR = '#e8a33d';          // Discord paints the embed's edge with it
 const CARD_W = 1200;
@@ -87,14 +98,21 @@ function readEnv(passed) {
 }
 
 function config(env) {
-  const site = (env.SITE_URL || 'https://dougai.github.io/particletoy').replace(/\/+$/, '');
+  const site = (env.SITE_URL || SITE_URL).replace(/\/+$/, '');
   return {
     site,
     cardImage: `${site}/img/og-card.jpg`,
-    supabaseUrl: (env.SUPABASE_URL || '').replace(/\/+$/, ''),
+    supabaseUrl: (env.SUPABASE_URL || SUPABASE_URL).replace(/\/+$/, ''),
     // PT_ANON_KEY wins: on Supabase it is the escape hatch for projects using
     // the newer publishable keys with the legacy anon key disabled.
-    anonKey: env.PT_ANON_KEY || env.SUPABASE_ANON_KEY || '',
+    anonKey: env.PT_ANON_KEY || env.SUPABASE_ANON_KEY || SUPABASE_ANON_KEY,
+    // Which of the two the values came from — the first thing worth knowing
+    // when a card is wrong and the host's dashboard says otherwise.
+    from: {
+      supabaseUrl: env.SUPABASE_URL ? 'env' : 'built-in',
+      anonKey: (env.PT_ANON_KEY || env.SUPABASE_ANON_KEY) ? 'env' : 'built-in',
+      site: env.SITE_URL ? 'env' : 'built-in',
+    },
   };
 }
 
@@ -384,6 +402,8 @@ export async function handle(req, passedEnv) {
       title: row ? row.title : null,
       previewColumns: found.previewColumns,
       anonKeySet: Boolean(cfg.anonKey),
+      configFrom: cfg.from,
+      supabaseUrl: cfg.supabaseUrl,
       siteUrl: cfg.site,
       youLookLikeACrawler: isCrawler,
       userAgent: ua,

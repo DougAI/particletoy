@@ -209,12 +209,13 @@ python serve.py            # then open http://localhost:8917</code></pre>
       deploy it, then <b>Edit code</b>.</li>
     <li>Replace the contents with <code>og/index.js</code> and deploy. You get
       <code>https://&lt;name&gt;.&lt;subdomain&gt;.workers.dev</code>.</li>
-    <li><b>Settings → Variables and Secrets</b>, add two:
-      <pre><code>SUPABASE_URL   https://&lt;your-ref&gt;.supabase.co
-PT_ANON_KEY    &lt;your publishable/anon key&gt;</code></pre>
-      Both are the same values as the top of <code>js/backend.js</code>. Add
-      <code>SITE_URL</code> as well if you host the site anywhere but this repo's
-      GitHub Pages URL.</li>
+    <li><b>Nothing to configure.</b> The project URL and publishable key are
+      constants at the top of the file, exactly as they are in
+      <code>js/backend.js</code> and public for the same reason — the endpoint reads
+      as <code>anon</code>, so row-level security is what limits it. Change them
+      there for your own project, or override with <code>SUPABASE_URL</code> /
+      <code>PT_ANON_KEY</code> / <code>SITE_URL</code> under <b>Settings → Variables
+      and Secrets</b> if you would rather not edit the file.</li>
     <li><b>Point the app at it.</b> In <code>js/backend.js</code>:
       <pre><code>const SHARE_BASE = 'https://&lt;name&gt;.&lt;subdomain&gt;.workers.dev/og';</code></pre>
       There is no default, deliberately — until this is set, Share hands out the plain
@@ -235,11 +236,10 @@ PT_ANON_KEY    &lt;your publishable/anon key&gt;</code></pre>
   <code>supabase functions deploy og --no-verify-jwt</code>, and keep <b>Verify JWT
   off</b>, since a crawler cannot send an API key and would otherwise get a 401.</p>
 
-  <p class="muted">Outside Supabase nothing is injected for you: set
-  <code>SUPABASE_URL</code> and <code>PT_ANON_KEY</code> by hand, or every lookup fails.
-  On Supabase they are provided automatically, and <code>PT_ANON_KEY</code> is only
-  needed if the project uses the newer publishable keys with the legacy anon key
-  disabled.</p>
+  <p class="muted"><code>?debug=1</code> reports <code>configFrom</code>, saying
+  whether each value came from an environment variable or the built-in constant —
+  worth checking first when a card is wrong and the host's dashboard claims
+  otherwise.</p>
 
   <p class="muted">If the <code>storage.buckets</code> statement in
   <code>schema.sql</code> errors on your project, set it by hand instead:
@@ -261,6 +261,8 @@ PT_ANON_KEY    &lt;your publishable/anon key&gt;</code></pre>
     <li><b>Anything but JSON</b> (an error page, "Function not found") — the function
       isn't deployed under the name <code>og</code>.</li>
     <li><code>{"code":401}</code> — on Supabase, <b>Verify JWT is still on</b>.</li>
+    <li><code>"note": "not configured: …"</code> — an environment variable is set to
+      an empty value, overriding the built-in constant with nothing.</li>
     <li>Correct-looking HTML that still previews as nothing — check the
       <code>Content-Type</code>. If it says <code>text/plain</code>, the host is
       neutering the page (see the box above).</li>
