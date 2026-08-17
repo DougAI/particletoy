@@ -122,10 +122,10 @@ tonemapping.
 - **Link previews** — paste a particle link into Discord, Slack or Twitter and the card
   shows the title, author, stats and the effect *playing*. Crawlers don't run JavaScript
   and a static host can't vary `<head>` per particle, so one small function
-  ([supabase/functions/og](supabase/functions/og)) renders the Open Graph tags and
-  redirects humans to the real page. It is written for Deno and runs unmodified on
-  Deno Deploy's free tier — *not* on a default `*.supabase.co` function URL, which
-  rewrites HTML responses to `text/plain`
+  ([og/index.js](og/index.js)) renders the Open Graph tags and redirects humans to the
+  real page. Dependency-free, build-step-free plain JS that detects its runtime, so the
+  one file runs on Cloudflare Workers or Deno Deploy — *not* on a default
+  `*.supabase.co` function URL, which rewrites HTML responses to `text/plain`
 - Admin curation (★ feature / ☀ particle of the day) straight from particle pages
 
 Setup for all of it is one SQL file + a few dashboard toggles — see
@@ -161,6 +161,6 @@ material API wrappers), `js/particles.js` (CPU simulation), `js/simlib.js` +
 `js/slangc.js` (the Slang → WGSL compile service, sole owner of the wasm),
 `js/wgslcache.js` (compiled WGSL saved with each effect), `js/ui.js` (inspector +
 editor panel). `js/exportmedia.js` renders clips on a detached canvas — both the
-Export Media downloads and the link-preview clips. `supabase/functions/og` is the
-only server-side code in the project (and `supabase/functions/og/index.test.mjs`
-its only test: `node --experimental-strip-types` it, no install needed).
+Export Media downloads and the link-preview clips. `og/index.js` is the only
+server-side code in the project (and `og/index.test.mjs` its only test:
+`node og/index.test.mjs`, no install, no flags).

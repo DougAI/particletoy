@@ -4,60 +4,46 @@
 // Why this exists: the site is static. GitHub Pages serves the very same
 // view.html for every particle, and link crawlers do not run JavaScript — so
 // no amount of client-side <meta> writing can give a particle its own preview
-// card. This function is the one dynamic piece of the whole project. It looks
-// the particle up, renders a <head> of per-particle Open Graph tags, and sends
+// card. This is the one dynamic piece of the whole project. It looks the
+// particle up, renders a <head> of per-particle Open Graph tags, and sends
 // real browsers straight on to the actual page.
 //
-// ── Where this can run ─────────────────────────────────────────────────────
-// NOT on a default *.supabase.co/functions/v1/ URL. Supabase rewrites a GET
+// Plain JavaScript, one file, no build step and no dependencies — so it can be
+// pasted straight into whichever host's editor you land on. It runs on:
+//
+//   Cloudflare Workers  — free, and the dashboard has an editor you can paste
+//                         into. Uses the `export default { fetch }` below.
+//   Deno / Deno Deploy  — uses the Deno.serve at the bottom.
+//   Supabase Edge Fns   — same Deno.serve, BUT see the warning below.
+//
+// ⚠ NOT on a default *.supabase.co/functions/v1/ URL. Supabase rewrites a GET
 // response of text/html to text/plain, deliberately, so its function domain
-// can't be used to serve web pages. The tags below arrive intact and every
-// crawler ignores them, because nothing parses meta tags out of plain text.
-// The symptom is a link that previews as nothing at all, from a function that
-// looks healthy in curl. Do not try to dodge it by mislabelling the response —
-// it is an anti-phishing control, and the neighbouring headers
-// (`Content-Security-Policy: default-src 'none'; sandbox`) are there too.
+// can't serve web pages. The tags arrive perfectly intact and every crawler
+// ignores them, because nothing parses meta tags out of plain text. The
+// symptom is a link that previews as nothing at all, from a function that
+// looks completely healthy in curl — 200, right body, right title — and the
+// giveaway is `Content-Type: text/plain` next to `Content-Security-Policy:
+// default-src 'none'; sandbox` in the response headers. Do not try to dodge it
+// by mislabelling the response; it is an anti-phishing control. Supabase's Pro
+// plan with the Edge Functions custom domain add-on lifts the restriction.
 //
-// So host it somewhere that will serve HTML. In preference order:
+// Configuration — environment variables, set in your host's dashboard:
 //
-//   Deno Deploy   — free, and this file runs unmodified. New playground or
-//                   project, paste this in, set SUPABASE_URL and PT_ANON_KEY
-//                   (and SITE_URL if you host the site elsewhere).
-//   Cloudflare    — free. Needs `export default { fetch }` instead of
-//     Workers       Deno.serve, and env read from the fetch argument.
-//   Supabase      — Pro plan + the custom domain add-on for Edge Functions
-//                   lifts the HTML restriction, if you would rather pay than
-//                   add a service.
+//   SUPABASE_URL      https://<your-ref>.supabase.co   (required)
+//   PT_ANON_KEY       your publishable/anon key        (required)
+//   SITE_URL          where the static site lives      (optional)
 //
-// Then point js/backend.js's SHARE_BASE at it. Whatever answers
-// <base>/<particle-id> with these tags will do.
+// The first two are the same values as the top of js/backend.js. On Supabase
+// they are injected automatically; everywhere else set them by hand.
 //
-// On Supabase specifically, deploy with:
-//     supabase functions deploy og --no-verify-jwt
-// Verify JWT must be off wherever a crawler has to reach it — a crawler
-// cannot send an API key, and with the check on every preview 401s.
+// Then point js/backend.js's SHARE_BASE at wherever this ends up. Anything
+// answering <base>/<particle-id> with these tags will do.
 //
 // Reads the database as `anon`, so row-level security applies and private
 // particles stay invisible — the same rules the website itself plays by.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Where the static site lives. Set the SITE_URL secret if you host it
-// somewhere else:  supabase secrets set SITE_URL=https://example.com
-const SITE_URL = (Deno.env.get('SITE_URL') || 'https://dougai.github.io/particletoy')
-  .replace(/\/+$/, '');
-
-// Running on Supabase, SUPABASE_URL and SUPABASE_ANON_KEY are injected and
-// there is nothing to configure. Anywhere else — Deno Deploy, a Worker — set
-// both by hand, using the same two values as the top of js/backend.js.
-//
-// PT_ANON_KEY takes precedence, and is also the escape hatch for Supabase
-// projects on the newer publishable keys that have the legacy anon key
-// disabled:  supabase secrets set PT_ANON_KEY=sb_publishable_...
-const SUPABASE_URL = (Deno.env.get('SUPABASE_URL') || '').replace(/\/+$/, '');
-const ANON_KEY = Deno.env.get('PT_ANON_KEY') || Deno.env.get('SUPABASE_ANON_KEY') || '';
-
 const BRAND_COLOR = '#e8a33d';          // Discord paints the embed's edge with it
-const CARD_IMAGE = `${SITE_URL}/img/og-card.jpg`;
 const CARD_W = 1200;
 const CARD_H = 630;
 
@@ -83,52 +69,57 @@ const SELECT_BASE = [
 const PREVIEW_COLS = 'preview_url,preview_type,preview_w,preview_h';
 const SELECT_FULL = `${SELECT_BASE},${PREVIEW_COLS}`;
 
-type Particle = {
-  id: string;
-  title: string;
-  description: string;
-  thumb_url: string | null;
-  tags: string[] | null;
-  preview_url: string | null;
-  preview_type: string | null;
-  preview_w: number | null;
-  preview_h: number | null;
-  views: number;
-  likes: number;
-  comment_count: number;
-  created_at: string;
-  author: { username: string | null; display_name: string | null } | null;
-};
+/** Every runtime hands over its environment differently: Workers pass an
+ *  object into fetch(), Deno keeps it behind Deno.env.get(). Normalize once,
+ *  here, so nothing below has to care which one it woke up in. */
+function readEnv(passed) {
+  if (passed && typeof passed === 'object' && passed.SUPABASE_URL) return passed;
+  const D = globalThis.Deno;
+  if (D && D.env) {
+    return {
+      SITE_URL: D.env.get('SITE_URL'),
+      SUPABASE_URL: D.env.get('SUPABASE_URL'),
+      SUPABASE_ANON_KEY: D.env.get('SUPABASE_ANON_KEY'),
+      PT_ANON_KEY: D.env.get('PT_ANON_KEY'),
+    };
+  }
+  return passed || {};
+}
 
-function esc(s: unknown): string {
+function config(env) {
+  const site = (env.SITE_URL || 'https://dougai.github.io/particletoy').replace(/\/+$/, '');
+  return {
+    site,
+    cardImage: `${site}/img/og-card.jpg`,
+    supabaseUrl: (env.SUPABASE_URL || '').replace(/\/+$/, ''),
+    // PT_ANON_KEY wins: on Supabase it is the escape hatch for projects using
+    // the newer publishable keys with the legacy anon key disabled.
+    anonKey: env.PT_ANON_KEY || env.SUPABASE_ANON_KEY || '',
+  };
+}
+
+function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
 }
 
-function clamp(s: string, max: number): string {
+function clamp(s, max) {
   const t = s.trim();
   return t.length <= max ? t : `${t.slice(0, max - 1).trimEnd()}…`;
 }
 
-function fmtCount(n: number): string {
+function fmtCount(n) {
   n = n || 0;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
   return String(n);
 }
 
-type Lookup = {
-  row: Particle | null;
-  status: number;
-  note: string;
-  previewColumns: 'present' | 'missing' | 'unknown';
-};
-
-async function query(id: string, select: string) {
-  const url = `${SUPABASE_URL}/rest/v1/particles?id=eq.${id}&select=${encodeURIComponent(select)}`;
+async function query(cfg, id, select) {
+  const url = `${cfg.supabaseUrl}/rest/v1/particles?id=eq.${id}&select=${encodeURIComponent(select)}`;
   const res = await fetch(url, {
-    headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+    headers: { apikey: cfg.anonKey, Authorization: `Bearer ${cfg.anonKey}` },
   });
   return { res, body: res.ok ? null : await res.text() };
 }
@@ -136,23 +127,25 @@ async function query(id: string, select: string) {
 /** Also reports how the lookup went, because "no row" has several very
  *  different causes — wrong key, RLS hiding a private particle, an
  *  out-of-date database, a bad id — and the card alone can't tell them
- *  apart. See ?debug=1. */
-async function fetchParticle(id: string): Promise<Lookup> {
+ *  apart. See ?debug=1.
+ *  @returns {{ row: object|null, status: number, note: string,
+ *              previewColumns: 'present'|'missing'|'unknown' }} */
+async function fetchParticle(cfg, id) {
   // Off Supabase these aren't injected, and forgetting them looks exactly like
   // every other lookup failure. Say which one it is.
-  if (!SUPABASE_URL || !ANON_KEY) {
+  if (!cfg.supabaseUrl || !cfg.anonKey) {
     return {
       row: null,
       status: 0,
       previewColumns: 'unknown',
-      note: `not configured: ${!SUPABASE_URL ? 'SUPABASE_URL' : 'the anon key'} is unset. `
+      note: `not configured: ${!cfg.supabaseUrl ? 'SUPABASE_URL' : 'the anon key'} is unset. `
         + 'Outside Supabase these must be set by hand — same two values as the top '
         + 'of js/backend.js.',
     };
   }
 
-  let { res, body } = await query(id, SELECT_FULL);
-  let previewColumns: Lookup['previewColumns'] = 'present';
+  let { res, body } = await query(cfg, id, SELECT_FULL);
+  let previewColumns = 'present';
 
   // 42703 = undefined_column: this project hasn't re-run schema.sql since
   // previews landed. Everything else about the card still works, so drop the
@@ -160,12 +153,11 @@ async function fetchParticle(id: string): Promise<Lookup> {
   if (!res.ok && /42703|does not exist/.test(body || '')) {
     console.warn('preview columns missing — re-run supabase/schema.sql. Falling back.');
     previewColumns = 'missing';
-    ({ res, body } = await query(id, SELECT_BASE));
+    ({ res, body } = await query(cfg, id, SELECT_BASE));
   }
 
   if (!res.ok) {
-    // Shows up in the function's dashboard logs. A 401 here means the anon key
-    // didn't work — see PT_ANON_KEY above.
+    // Shows up in your host's logs. A 401 here means the anon key didn't work.
     console.error(`particle lookup failed: ${res.status} ${body}`);
     return {
       row: null,
@@ -176,7 +168,7 @@ async function fetchParticle(id: string): Promise<Lookup> {
   }
 
   const rows = await res.json();
-  if (!rows?.length) {
+  if (!rows || !rows.length) {
     return {
       row: null,
       status: res.status,
@@ -196,7 +188,7 @@ async function fetchParticle(id: string): Promise<Lookup> {
   };
 }
 
-function meta(tags: Array<[string, string | number | null | undefined]>): string {
+function meta(tags) {
   return tags
     .filter(([, v]) => v !== null && v !== undefined && v !== '')
     .map(([k, v]) => {
@@ -212,16 +204,13 @@ function meta(tags: Array<[string, string | number | null | undefined]>): string
     .join('\n');
 }
 
-function page(
-  { title, description, canonical, tags }:
-  { title: string; description: string; canonical: string; tags: string },
-): string {
+function page({ title, canonical, tags }) {
   // No meta-refresh and no redirect script, deliberately. A browser never
-  // reaches this page — it gets a 302 several lines below — so a crawler is
-  // the only thing that ever reads this HTML, and telling a crawler the page
-  // has moved is the last thing we want: it re-crawls view.html, whose tags
-  // are the generic site ones, and some drop the embed rather than follow.
-  // The plain link is for a human running ?card=1 to inspect the tags.
+  // reaches this page — it gets a 302 further down — so a crawler is the only
+  // thing that ever reads this HTML, and telling a crawler the page has moved
+  // is the last thing we want: it re-crawls view.html, whose tags are the
+  // generic site ones, and some drop the embed rather than follow. The plain
+  // link is for a human running ?card=1 to inspect the tags.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -243,36 +232,35 @@ ${tags}
 }
 
 /** The generic site card — for a bad id, a private particle, or a bare /og. */
-function siteCard(): string {
+function siteCard(cfg) {
   const title = 'particletoy — build, explore & share particle effects';
   const description = 'A shadertoy-style playground for realtime particle effects: '
     + 'programmable PBR materials, WebGPU, and a community gallery.';
   return page({
     title,
-    description,
-    canonical: `${SITE_URL}/`,
+    canonical: `${cfg.site}/`,
     tags: meta([
       ['og:site_name', 'particletoy'],
       ['og:type', 'website'],
-      ['og:url', `${SITE_URL}/`],
+      ['og:url', `${cfg.site}/`],
       ['og:title', title],
       ['og:description', description],
-      ['og:image', CARD_IMAGE],
+      ['og:image', cfg.cardImage],
       ['og:image:width', CARD_W],
       ['og:image:height', CARD_H],
       ['twitter:card', 'summary_large_image'],
       ['twitter:title', title],
       ['twitter:description', description],
-      ['twitter:image', CARD_IMAGE],
+      ['twitter:image', cfg.cardImage],
       ['description', description],
       ['theme-color', BRAND_COLOR],
     ]),
   });
 }
 
-function particleCard(p: Particle): string {
-  const canonical = `${SITE_URL}/view.html?id=${p.id}`;
-  const author = p.author?.display_name || p.author?.username || 'anonymous';
+function particleCard(cfg, p) {
+  const canonical = `${cfg.site}/view.html?id=${p.id}`;
+  const author = (p.author && (p.author.display_name || p.author.username)) || 'anonymous';
   const title = `${p.title} — by ${author}`;
 
   // Discord renders newlines in og:description, so the stats get their own
@@ -281,13 +269,13 @@ function particleCard(p: Particle): string {
   const blurb = clamp(p.description || 'A realtime particle effect made with particletoy.', 240);
   const description = `${blurb}\n\n${stats}`;
 
-  const poster = p.thumb_url || CARD_IMAGE;
+  const poster = p.thumb_url || cfg.cardImage;
   const isVideo = (p.preview_type || '').startsWith('video/');
   const isGif = p.preview_type === 'image/gif';
   const vw = p.preview_w || 960;
   const vh = p.preview_h || 540;
 
-  const tags: Array<[string, string | number | null | undefined]> = [
+  const tags = [
     ['og:site_name', 'particletoy'],
     ['og:url', canonical],
     ['og:title', title],
@@ -337,12 +325,15 @@ function particleCard(p: Particle): string {
 
   tags.push(['twitter:title', title], ['twitter:description', description]);
 
-  return page({ title, description, canonical, tags: meta(tags) });
+  return page({ title, canonical, tags: meta(tags) });
 }
 
-Deno.serve(async (req: Request) => {
+/** The whole endpoint. Exported so the test can drive it without a server. */
+export async function handle(req, passedEnv) {
+  const cfg = config(readEnv(passedEnv));
   const url = new URL(req.url);
-  const id = (url.searchParams.get('id') || url.pathname).match(UUID)?.[0] ?? null;
+  const idMatch = (url.searchParams.get('id') || url.pathname).match(UUID);
+  const id = idMatch ? idMatch[0] : null;
   const ua = req.headers.get('user-agent') || '';
   // ?card=1 renders the HTML for a human too — handy for checking a card
   // without pretending to be Discordbot.
@@ -361,36 +352,36 @@ Deno.serve(async (req: Request) => {
   // with 404 turns every lookup problem into the same silent nothing. The
   // generic site card is a far better answer — the link still previews, and
   // seeing the generic one instead of the particle's says where to look.
-  if (!id) return new Response(siteCard(), { status: 200, headers });
+  if (!id) return new Response(siteCard(cfg), { status: 200, headers });
 
-  let found: Lookup;
+  let found;
   try {
-    found = await fetchParticle(id);
+    found = await fetchParticle(cfg, id);
   } catch (ex) {
     found = {
       row: null, status: 0, previewColumns: 'unknown',
-      note: `lookup threw: ${(ex as Error).message}`,
+      note: `lookup threw: ${ex.message}`,
     };
   }
 
   // ?debug=1 — what the endpoint saw, in the order worth checking. No secrets:
   // the key is reported as present/absent, never echoed.
   if (url.searchParams.has('debug')) {
+    const row = found.row;
     return Response.json({
       id,
-      particleFound: Boolean(found.row),
+      particleFound: Boolean(row),
       restStatus: found.status,
       note: found.note,
-      cardWouldShow: !found.row ? 'the generic particletoy card'
-        : found.row.preview_type?.startsWith('video/') ? `a playing clip (${found.row.preview_type})`
-        : found.row.preview_type === 'image/gif' ? 'a GIF (first frame only in Discord)'
-        : found.row.thumb_url ? 'the still thumbnail — no preview clip rendered yet'
+      cardWouldShow: !row ? 'the generic particletoy card'
+        : (row.preview_type || '').startsWith('video/') ? `a playing clip (${row.preview_type})`
+        : row.preview_type === 'image/gif' ? 'a GIF (first frame only in Discord)'
+        : row.thumb_url ? 'the still thumbnail — no preview clip rendered yet'
         : 'the generic card image — this particle has no thumbnail either',
-      title: found.row?.title ?? null,
+      title: row ? row.title : null,
       previewColumns: found.previewColumns,
-      anonKeySet: Boolean(ANON_KEY),
-      usingPtAnonKey: Boolean(Deno.env.get('PT_ANON_KEY')),
-      siteUrl: SITE_URL,
+      anonKeySet: Boolean(cfg.anonKey),
+      siteUrl: cfg.site,
       youLookLikeACrawler: isCrawler,
       userAgent: ua,
     }, { headers: { 'cache-control': 'no-store', 'access-control-allow-origin': '*' } });
@@ -399,10 +390,19 @@ Deno.serve(async (req: Request) => {
   if (!isCrawler) {
     // Humans never see the card. Unknown ids still go to view.html, which
     // shows its own "doesn't exist, or it's private" state.
-    const to = `${SITE_URL}/view.html?id=${encodeURIComponent(id)}`;
+    const to = `${cfg.site}/view.html?id=${encodeURIComponent(id)}`;
     return new Response(null, { status: 302, headers: { location: to, 'cache-control': 'no-store' } });
   }
 
-  if (!found.row) return new Response(siteCard(), { status: 200, headers });
-  return new Response(particleCard(found.row), { status: 200, headers });
-});
+  if (!found.row) return new Response(siteCard(cfg), { status: 200, headers });
+  return new Response(particleCard(cfg, found.row), { status: 200, headers });
+}
+
+// Cloudflare Workers (and anything else module-worker shaped) uses this.
+export default { fetch: handle };
+
+// Deno — Deno Deploy, Supabase Edge Functions, `deno run` locally. Skipped on
+// Workers, where Deno is undefined and the default export is the entry point.
+if (globalThis.Deno && globalThis.Deno.serve) {
+  globalThis.Deno.serve((req) => handle(req));
+}
