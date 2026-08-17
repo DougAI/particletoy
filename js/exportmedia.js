@@ -27,14 +27,26 @@ export function getVideoMimeType() {
   return null;
 }
 
+// Ceiling on the wait for the compute sims to compile. Building their
+// pipelines from WGSL is well under a second on real hardware, so reaching
+// this means something is wrong — export whatever does render rather than
+// leaving the dialog to look hung.
+const WARMUP_TIMEOUT_MS = 15_000;
+
 // Async because EffectPlayer creates its device, renderer and camera in an
 // async setup step — touching player.camera/renderer before `ready` resolves
 // throws. Also waits on the material compiles so the first frames aren't blank.
-async function makeExportPlayer(data, camera, pipeline, w, h) {
+async function makeExportPlayer(data, camera, pipeline, w, h, signal) {
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
-  const player = new EffectPlayer(canvas, { interactive: false, pipeline });
+  // allowCompile: the export player defaults, like the gallery, to rendering
+  // only from the WGSL the effect carries. The editor hands it that cache, but
+  // it can be a miss — a shader edited a moment ago is still compiling, so the
+  // cache holds the previous source's WGSL. We are running inside the editor
+  // with the compiler already resident, so recompiling is the right fallback;
+  // without it a cache miss silently exports an effect with no particles.
+  const player = new EffectPlayer(canvas, { interactive: false, pipeline, allowCompile: true });
   let ok = false;
   try {
     ok = await player.ready;
@@ -54,11 +66,42 @@ async function makeExportPlayer(data, camera, pipeline, w, h) {
     player.camera.pitch = camera.pitch;
     player.camera.dist = camera.dist;
     player.renderer.resize(w, h);
+    await warmUp(player, w, h, signal);
   } catch (ex) {
     player.dispose();
     throw ex;
   }
   return { canvas, player };
+}
+
+/**
+ * Gets the compute sims compiled before recording starts, then rewinds to
+ * t = 0.
+ *
+ * A shader-mode emitter's SimRuntime is built by its first render, which also
+ * starts the compile; until the pipelines land the emitter draws nothing. So:
+ * render one throwaway frame to create the runtimes, wait for them, then put
+ * the clock back to zero so the clip opens where the effect does rather than
+ * a few empty frames in.
+ *
+ * The throwaway frame is stepped with dt = 0, which advances no simulated time
+ * and spawns nothing the rewind would have to undo. Waiting is a plain sleep
+ * loop rather than a render loop on purpose — rendering while a pipeline
+ * compiles just makes the GPU do both at once, and the sims need nothing more
+ * from us until they are ready.
+ */
+async function warmUp(player, w, h, signal) {
+  stepAndRender(player, 0, w, h);
+  // Collected after that first render: emitters with no material never get a
+  // runtime at all, and waiting on one would burn the whole timeout.
+  const sims = player.emitters.map((em) => em.simRt).filter(Boolean);
+  const deadline = performance.now() + WARMUP_TIMEOUT_MS;
+  while (sims.some((rt) => !rt.pipeUpdate && !rt.errors.length)) {
+    if (signal?.cancelled || performance.now() > deadline) break;
+    await wait(16);
+  }
+  player.time = 0;
+  for (const em of player.emitters) em.restart();
 }
 
 function stepAndRender(player, dt, w, h) {
@@ -89,7 +132,7 @@ export async function exportVideo(opts) {
   const totalFrames = Math.max(1, Math.round(seconds * fps));
   const dt = 1 / fps;
 
-  const { canvas, player } = await makeExportPlayer(data, camera, pipeline, w, h);
+  const { canvas, player } = await makeExportPlayer(data, camera, pipeline, w, h, signal);
   try {
     if (typeof canvas.captureStream !== 'function') {
       throw new Error('This browser cannot record a canvas — try GIF instead.');
@@ -130,7 +173,7 @@ export async function exportGif(opts) {
   const dt = 1 / fps;
   const delay = Math.round(1000 / fps);
 
-  const { canvas, player } = await makeExportPlayer(data, camera, pipeline, w, h);
+  const { canvas, player } = await makeExportPlayer(data, camera, pipeline, w, h, signal);
   const read = document.createElement('canvas');
   read.width = w;
   read.height = h;
