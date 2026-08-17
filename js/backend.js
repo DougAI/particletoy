@@ -552,16 +552,30 @@ export async function uploadPreview(particleId, clip) {
 // renders per-particle Open Graph tags and bounces real browsers on to the
 // page. See supabase/functions/og/index.ts.
 
-// Set this if the previews are served from somewhere prettier — a Cloudflare
-// Worker or Netlify function on your own domain, say. Anything that answers
-// <base>/<particle-id> with Open Graph tags will do.
+// Where supabase/functions/og is deployed, e.g.
+//   'https://particletoy-og.deno.dev/og'
+//
+// Required for per-particle previews, and there is deliberately no default.
+// The obvious one — this project's own /functions/v1/og — cannot work:
+// Supabase rewrites an edge function's text/html response to text/plain to
+// stop its domain serving web pages, and no crawler reads meta tags out of
+// plain text. It has to live somewhere that will serve HTML; see the header
+// of supabase/functions/og/index.ts. Anything answering
+// <base>/<particle-id> with those tags will do.
 const SHARE_BASE = '';
 
-/** The link to hand to Discord et al. Falls back to the plain page link when
- *  the backend isn't configured at all. */
+/** True once SHARE_BASE points somewhere, i.e. particles can have their own
+ *  preview cards. Without it they fall back to the site-wide card. */
+export function previewsConfigured() {
+  return Boolean(SHARE_BASE);
+}
+
+/** The link to hand to Discord et al. Without a preview endpoint this is just
+ *  the page link — which still previews, using the static tags in view.html,
+ *  just with the site card rather than the particle's own. */
 export function shareLink(particleId) {
-  if (!backendConfigured()) return pageLink(particleId);
-  return `${SHARE_BASE || `${SUPABASE_URL}/functions/v1/og`}/${particleId}`;
+  if (!SHARE_BASE || !backendConfigured()) return pageLink(particleId);
+  return `${SHARE_BASE.replace(/\/+$/, '')}/${particleId}`;
 }
 
 /** The particle's page on this site. */

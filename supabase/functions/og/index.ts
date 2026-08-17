@@ -8,12 +8,34 @@
 // the particle up, renders a <head> of per-particle Open Graph tags, and sends
 // real browsers straight on to the actual page.
 //
-// Deploy (Supabase CLI):
-//     supabase functions deploy og --no-verify-jwt
+// ── Where this can run ─────────────────────────────────────────────────────
+// NOT on a default *.supabase.co/functions/v1/ URL. Supabase rewrites a GET
+// response of text/html to text/plain, deliberately, so its function domain
+// can't be used to serve web pages. The tags below arrive intact and every
+// crawler ignores them, because nothing parses meta tags out of plain text.
+// The symptom is a link that previews as nothing at all, from a function that
+// looks healthy in curl. Do not try to dodge it by mislabelling the response —
+// it is an anti-phishing control, and the neighbouring headers
+// (`Content-Security-Policy: default-src 'none'; sandbox`) are there too.
 //
-// or Dashboard → Edge Functions → Deploy a new function → paste this file,
-// then turn "Verify JWT" OFF. That switch is not optional: a crawler cannot
-// send an API key, so with JWT verification on every preview 401s.
+// So host it somewhere that will serve HTML. In preference order:
+//
+//   Deno Deploy   — free, and this file runs unmodified. New playground or
+//                   project, paste this in, set SUPABASE_URL and PT_ANON_KEY
+//                   (and SITE_URL if you host the site elsewhere).
+//   Cloudflare    — free. Needs `export default { fetch }` instead of
+//     Workers       Deno.serve, and env read from the fetch argument.
+//   Supabase      — Pro plan + the custom domain add-on for Edge Functions
+//                   lifts the HTML restriction, if you would rather pay than
+//                   add a service.
+//
+// Then point js/backend.js's SHARE_BASE at it. Whatever answers
+// <base>/<particle-id> with these tags will do.
+//
+// On Supabase specifically, deploy with:
+//     supabase functions deploy og --no-verify-jwt
+// Verify JWT must be off wherever a crawler has to reach it — a crawler
+// cannot send an API key, and with the check on every preview 401s.
 //
 // Reads the database as `anon`, so row-level security applies and private
 // particles stay invisible — the same rules the website itself plays by.
@@ -24,12 +46,14 @@
 const SITE_URL = (Deno.env.get('SITE_URL') || 'https://dougai.github.io/particletoy')
   .replace(/\/+$/, '');
 
-// Supabase injects SUPABASE_URL and SUPABASE_ANON_KEY into every function, so
-// there is normally nothing to configure. PT_ANON_KEY is the escape hatch for
+// Running on Supabase, SUPABASE_URL and SUPABASE_ANON_KEY are injected and
+// there is nothing to configure. Anywhere else — Deno Deploy, a Worker — set
+// both by hand, using the same two values as the top of js/backend.js.
+//
+// PT_ANON_KEY takes precedence, and is also the escape hatch for Supabase
 // projects on the newer publishable keys that have the legacy anon key
-// disabled — set it to the same key js/backend.js uses:
-//     supabase secrets set PT_ANON_KEY=sb_publishable_...
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+// disabled:  supabase secrets set PT_ANON_KEY=sb_publishable_...
+const SUPABASE_URL = (Deno.env.get('SUPABASE_URL') || '').replace(/\/+$/, '');
 const ANON_KEY = Deno.env.get('PT_ANON_KEY') || Deno.env.get('SUPABASE_ANON_KEY') || '';
 
 const BRAND_COLOR = '#e8a33d';          // Discord paints the embed's edge with it
@@ -114,6 +138,19 @@ async function query(id: string, select: string) {
  *  out-of-date database, a bad id — and the card alone can't tell them
  *  apart. See ?debug=1. */
 async function fetchParticle(id: string): Promise<Lookup> {
+  // Off Supabase these aren't injected, and forgetting them looks exactly like
+  // every other lookup failure. Say which one it is.
+  if (!SUPABASE_URL || !ANON_KEY) {
+    return {
+      row: null,
+      status: 0,
+      previewColumns: 'unknown',
+      note: `not configured: ${!SUPABASE_URL ? 'SUPABASE_URL' : 'the anon key'} is unset. `
+        + 'Outside Supabase these must be set by hand — same two values as the top '
+        + 'of js/backend.js.',
+    };
+  }
+
   let { res, body } = await query(id, SELECT_FULL);
   let previewColumns: Lookup['previewColumns'] = 'present';
 

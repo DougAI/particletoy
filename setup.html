@@ -178,40 +178,62 @@ python serve.py            # then open http://localhost:8917</code></pre>
   crawler asking GitHub Pages for <code>view.html?id=…</code> gets the same
   <code>&lt;head&gt;</code> no matter which particle you linked, so the card can't be
   built in the browser. Something has to answer that URL with per-particle
-  <code>&lt;meta&gt;</code> tags. That something is a small Supabase edge function —
-  <code>supabase/functions/og</code> — which looks the particle up as
-  <code>anon</code> (so private ones stay private), renders the tags, and redirects
-  real browsers to the actual page.</p>
+  <code>&lt;meta&gt;</code> tags. That something is
+  <code>supabase/functions/og</code>, which looks the particle up as <code>anon</code>
+  (so private ones stay private), renders the tags, and redirects real browsers to the
+  actual page.</p>
+
+  <div class="card">
+    <p><b>It cannot run on a <code>*.supabase.co/functions/v1/</code> URL.</b> Supabase
+    rewrites an edge function's <code>text/html</code> GET response to
+    <code>text/plain</code>, on purpose, so its domain can't serve web pages. The tags
+    arrive perfectly intact and every crawler ignores them, because nothing parses meta
+    tags out of plain text.</p>
+    <p class="muted">The symptom is a link that previews as <em>nothing at all</em>,
+    from a function that looks completely healthy in <code>curl</code> — 200, right
+    body, right title. The giveaway is in the response headers:
+    <code>Content-Type: text/plain</code> next to
+    <code>Content-Security-Policy: default-src 'none'; sandbox</code>. Don't try to
+    dodge it by mislabelling the response; it is an anti-phishing control.</p>
+  </div>
+
+  <p>So host it somewhere that serves HTML. The file is written for Deno, so:</p>
 
   <ol>
-    <li><b>Deploy it.</b> With the
-      <a href="https://supabase.com/docs/guides/cli" target="_blank">Supabase CLI</a>:
-      <pre><code>supabase link --project-ref &lt;your-project-ref&gt;
-supabase functions deploy og</code></pre>
-      No CLI? <b>Dashboard → Edge Functions → Deploy a new function → via Editor</b>,
-      name it <code>og</code>, paste <code>supabase/functions/og/index.ts</code>, and
-      turn <b>Verify JWT off</b>.</li>
-    <li><b>Verify JWT must be off.</b> Discord can't send an API key, so with it on
-      every crawler gets a 401 and no card. <code>supabase/config.toml</code> sets this
-      for the CLI; the dashboard has a toggle on the function's settings.</li>
-    <li><b>Point it at your site</b>, if you host it anywhere but this repo's GitHub
-      Pages URL:
-      <pre><code>supabase secrets set SITE_URL=https://example.com/particletoy</code></pre>
-      It defaults to <code>https://dougai.github.io/particletoy</code>. The same URL is
-      hard-coded in each page's <code>og:</code> tags for the generic site card —
-      search the HTML files for <code>og:image</code> and change it there too.</li>
+    <li><b>Deno Deploy</b> (free, and this file runs unmodified) —
+      <a href="https://deno.com/deploy" target="_blank">deno.com/deploy</a> → new
+      playground → paste <code>supabase/functions/og/index.ts</code> → set two
+      environment variables:
+      <pre><code>SUPABASE_URL   https://&lt;your-ref&gt;.supabase.co
+PT_ANON_KEY    &lt;your publishable/anon key&gt;</code></pre>
+      Both are the same values as the top of <code>js/backend.js</code>. Add
+      <code>SITE_URL</code> too if you host the site anywhere but this repo's GitHub
+      Pages URL. You get <code>https://&lt;name&gt;.deno.dev</code>.</li>
+
+    <li><b>Point the app at it.</b> In <code>js/backend.js</code>:
+      <pre><code>const SHARE_BASE = 'https://&lt;name&gt;.deno.dev/og';</code></pre>
+      There is no default, deliberately — until this is set, Share hands out the plain
+      page link, which still previews, just with the site card rather than the
+      particle's own.</li>
+
     <li><b>Re-run <code>schema.sql</code></b> if your project predates this feature. It
       adds the <code>preview_*</code> columns and widens the <code>media</code> bucket
       to accept video (it is safe to re-run).</li>
   </ol>
 
-  <p class="muted">The function reads <code>SUPABASE_URL</code> and
-  <code>SUPABASE_ANON_KEY</code>, which Supabase injects automatically — normally
-  nothing to configure. If your project uses the newer publishable keys and has the
-  legacy anon key disabled, the lookup 401s (visible in the function's logs, and the
-  card falls back to the generic one). Fix it with the same key
-  <code>js/backend.js</code> uses:
-  <code>supabase secrets set PT_ANON_KEY=sb_publishable_…</code></p>
+  <p><b>Alternatives.</b> A <b>Cloudflare Worker</b> is equally free but needs a small
+  port — <code>export default { fetch }</code> in place of <code>Deno.serve</code>, and
+  env read from the fetch argument. Or stay on Supabase with the <b>Pro plan plus the
+  Edge Functions custom domain add-on</b>, which lifts the HTML restriction, if you
+  would rather pay than add a service. Deploying there is
+  <code>supabase functions deploy og</code> — with <b>Verify JWT off</b>, since a
+  crawler cannot send an API key and would otherwise get a 401.</p>
+
+  <p class="muted">Outside Supabase nothing is injected for you: set
+  <code>SUPABASE_URL</code> and <code>PT_ANON_KEY</code> by hand, or every lookup fails.
+  On Supabase they are provided automatically, and <code>PT_ANON_KEY</code> is only
+  needed if the project uses the newer publishable keys with the legacy anon key
+  disabled.</p>
 
   <p class="muted">If the <code>storage.buckets</code> statement in
   <code>schema.sql</code> errors on your project, set it by hand instead:
@@ -228,12 +250,14 @@ supabase functions deploy og</code></pre>
   <h3>Checking it</h3>
   <p><code>?debug=1</code> answers "why is my card wrong" in one request — whether the
   particle was found, what the database said, and what the card will show:</p>
-  <pre><code>curl 'https://&lt;ref&gt;.supabase.co/functions/v1/og/&lt;particle-id&gt;?debug=1'</code></pre>
+  <pre><code>curl 'https://&lt;your-og-host&gt;/og/&lt;particle-id&gt;?debug=1'</code></pre>
   <ul class="muted">
     <li><b>Anything but JSON</b> (an error page, "Function not found") — the function
       isn't deployed under the name <code>og</code>.</li>
-    <li><code>{"code":401}</code> instead of the JSON below — <b>Verify JWT is still
-      on</b>. That is the single most common cause of a link that previews as nothing.</li>
+    <li><code>{"code":401}</code> — on Supabase, <b>Verify JWT is still on</b>.</li>
+    <li>Correct-looking HTML that still previews as nothing — check the
+      <code>Content-Type</code>. If it says <code>text/plain</code>, the host is
+      neutering the page (see the box above).</li>
     <li><code>particleFound: false</code> with <code>restStatus: 200</code> — the
       particle is <b>private</b>, or the id is wrong. Previews read the database as
       <code>anon</code>, exactly like a signed-out visitor.</li>
@@ -243,7 +267,11 @@ supabase functions deploy og</code></pre>
       still, or falls back to the generic image.</li>
   </ul>
   <p><code>?card=1</code> renders the actual HTML, so you can read the tags:</p>
-  <pre><code>curl 'https://&lt;ref&gt;.supabase.co/functions/v1/og/&lt;particle-id&gt;?card=1'</code></pre>
+  <pre><code>curl -i 'https://&lt;your-og-host&gt;/og/&lt;particle-id&gt;?card=1'</code></pre>
+  <p class="muted">Check the <b>headers</b> as well as the body: a
+  <code>Content-Type</code> of anything but <code>text/html</code> means the host is
+  refusing to serve it as a page, and no crawler will read the tags however correct
+  they are.</p>
   <p class="muted">Discord caches an embed per URL for a good while, including the
   "no embed" result. After a fix, test with a cache-busting query
   (<code>…/og/&lt;id&gt;?v=2</code>) rather than the URL that already failed.</p>
@@ -271,11 +299,10 @@ supabase functions deploy og</code></pre>
   Interactive embeds aren't possible either — Discord only runs players for a handful of
   whitelisted providers, so a playing clip is as close as it gets.</p>
 
-  <p class="muted">Prefer your own domain over
-  <code>&lt;ref&gt;.supabase.co/functions/v1/og/…</code>? Anything that answers
-  <code>&lt;base&gt;/&lt;particle-id&gt;</code> with the same tags works — a Cloudflare
-  Worker or Netlify function wrapping the same code. Set <code>SHARE_BASE</code> in
-  <code>js/backend.js</code> and the app hands out that address instead.</p>
+  <p class="muted">Moving it later is one constant: point <code>SHARE_BASE</code> in
+  <code>js/backend.js</code> at whatever answers <code>&lt;base&gt;/&lt;particle-id&gt;</code>
+  with these tags. Links already shared keep working only if the old host stays up, so
+  prefer a home you will keep.</p>
 
   <h2><span class="n">7</span>Donate buttons</h2>
   <p>The front page shows PayPal and Patreon buttons. Point them at your real pages in
