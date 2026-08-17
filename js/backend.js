@@ -562,7 +562,7 @@ export async function uploadPreview(particleId, clip) {
 // plain text. It has to live somewhere that will serve HTML; see the header
 // of og/index.js. Anything answering
 // <base>/<particle-id> with those tags will do.
-const SHARE_BASE = '';
+const SHARE_BASE = 'https://fancy-cloud-5dc0.yoghurt-forked2d.workers.dev/og';
 
 /** True once SHARE_BASE points somewhere, i.e. particles can have their own
  *  preview cards. Without it they fall back to the site-wide card. */
