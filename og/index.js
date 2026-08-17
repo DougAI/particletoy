@@ -60,10 +60,32 @@ const CARD_H = 630;
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
-// Crawlers announce themselves; anything that looks like one gets the HTML,
-// everyone else gets redirected to the real page. An empty user-agent counts
-// as a crawler — several of them send none, and a browser always does.
-const CRAWLER = /bot|crawl|spider|discord|slack|telegram|twitter|facebook|whatsapp|linkedin|mastodon|pinterest|skype|vkshare|embed|preview|curl|wget|http-client|iframely|opengraph|metainspector/i;
+// Who gets the card, and who gets sent on to the real page.
+//
+// This used to be a list of crawler names, and that list is never finished.
+// Bluesky's fetcher announces itself as "Mozilla/5.0 (compatible; Bluesky
+// Cardyb/1.1; +mailto:…)" — no "bot", no "crawl", nothing any such list would
+// think to include — so it was quietly handed a redirect instead of a card,
+// and Bluesky posts previewed as the generic site card or not at all.
+//
+// So the question is inverted. Only something that positively looks like a
+// browser gets redirected; everything else — known crawler, unknown crawler,
+// curl, a runtime nobody has heard of yet — gets the card. The failure mode
+// for a stranger is now a working preview rather than a silent redirect.
+const BROWSER_ENGINE = /Chrome\/|Safari\/|Firefox\/|Edg\/|OPR\/|Trident\//;
+// Anything self-identifying as automation, however much Mozilla it wears.
+const AUTOMATION = /bot\b|bot\/|crawl|spider|slurp|fetcher|cardyb|preview|embed|curl|wget|python-|java\/|go-http|okhttp|libwww|headless/i;
+
+function looksLikeBrowser(req) {
+  const ua = req.headers.get('user-agent') || '';
+  if (!ua) return false;                 // several crawlers send none; browsers always do
+  if (AUTOMATION.test(ua)) return false;
+  // Browsers set Sec-Fetch-Mode on a top-level navigation; no server-side
+  // fetcher bothers. When it's present it is the most reliable signal there is.
+  const mode = req.headers.get('sec-fetch-mode');
+  if (mode) return mode === 'navigate';
+  return BROWSER_ENGINE.test(ua);
+}
 
 // Everything the card needs that has always existed. A project that has not
 // re-run schema.sql since previews landed still answers this.
@@ -319,8 +341,8 @@ function particleCard(cfg, p) {
       ['og:video:type', p.preview_type],
       ['og:video:width', vw],
       ['og:video:height', vh],
-      ['og:image:width', 640],
-      ['og:image:height', 360],
+      ['og:image:width', CARD_W],
+      ['og:image:height', CARD_H],
       // Discord wants the Twitter card set too before it will show a player.
       ['twitter:card', 'player'],
       ['twitter:player', canonical],
@@ -354,8 +376,8 @@ export async function handle(req, passedEnv) {
   const id = idMatch ? idMatch[0] : null;
   const ua = req.headers.get('user-agent') || '';
   // ?card=1 renders the HTML for a human too — handy for checking a card
-  // without pretending to be Discordbot.
-  const isCrawler = !ua || CRAWLER.test(ua) || url.searchParams.has('card');
+  // without pretending to be a crawler.
+  const isCrawler = !looksLikeBrowser(req) || url.searchParams.has('card');
 
   const headers = {
     'content-type': 'text/html; charset=utf-8',

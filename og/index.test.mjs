@@ -200,4 +200,56 @@ function ok(name, cond, extra = '') {
   ok('debug says to re-run schema.sql', /schema\.sql/.test(j.note), j.note);
 }
 
+// ── 11. Who gets a card vs a redirect, by real user agent ──────────────────
+// The old crawler-name list silently redirected Bluesky, whose fetcher calls
+// itself "Cardyb" and matches no such list. The rule is inverted now: only a
+// positively browser-shaped request is redirected.
+{
+  globalThis.fetch = async () => ({ ok: true, json: async () => [ROW] });
+  const agents = [
+    ['Discordbot',  'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)', 'card'],
+    ['Bluesky',     'Mozilla/5.0 (compatible; Bluesky Cardyb/1.1; +mailto:support@bsky.app)', 'card'],
+    ['LinkedInBot', 'LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)', 'card'],
+    ['Slackbot',    'Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)', 'card'],
+    ['Twitterbot',  'Twitterbot/1.0', 'card'],
+    ['WhatsApp',    'WhatsApp/2.23.20.0', 'card'],
+    ['Telegram',    'TelegramBot (like TwitterBot)', 'card'],
+    ['Mastodon',    'http.rb/5.1.1 (Mastodon/4.2.1; +https://mastodon.social/)', 'card'],
+    ['no UA',       '', 'card'],
+    ['curl',        'curl/8.21.0', 'card'],
+    ['some new one','Mozilla/5.0 (compatible; SomeFutureCardService/2.0)', 'card'],
+  ];
+  for (const [name, ua, want] of agents) {
+    const res = await call(`https://proj.supabase.co/og/${ID}`, ua);
+    const got = res.status === 200 ? 'card' : 'redirect';
+    ok(`${name} gets the ${want}`, got === want, `${got} (${res.status})`);
+  }
+
+  // Real browsers must still be sent on to the page.
+  const chrome = new Request(`https://proj.supabase.co/og/${ID}`, {
+    headers: {
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        + '(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+      'sec-fetch-mode': 'navigate',
+    },
+  });
+  const r1 = await handle(chrome, ENV);
+  ok('Chrome is redirected to the page', r1.status === 302, String(r1.status));
+
+  // …including one too old to send Sec-Fetch-Mode.
+  const older = await call(`https://proj.supabase.co/og/${ID}`,
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Safari/605.1.15');
+  ok('an older browser is redirected too', older.status === 302, String(older.status));
+}
+
+// ── 12. The poster is card-sized, not thumbnail-sized ──────────────────────
+// LinkedIn declines to build a card at all below 1200x627.
+{
+  globalThis.fetch = async () => ({ ok: true, json: async () => [ROW] });
+  const html = await (await call(`https://proj.supabase.co/og/${ID}`, DISCORD)).text();
+  ok('og:image is declared at card size',
+     html.includes('<meta property="og:image:width" content="1200">')
+     && html.includes('<meta property="og:image:height" content="630">'), '\n' + html);
+}
+
 console.log(process.exitCode ? '\nFAILED' : '\nall good');
