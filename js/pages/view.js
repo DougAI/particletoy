@@ -7,6 +7,7 @@ import {
   avatarHTML, ensureSignedIn, modal, closeModal,
 } from '../site.js';
 import { EffectPlayer } from '../player.js';
+import { capturePreviewClip } from '../exportmedia.js';
 
 const $ = (id) => document.getElementById(id);
 const page = document.getElementById('page');
@@ -20,6 +21,15 @@ function notFound() {
   page.innerHTML = `<div class="empty" style="margin-top:40px">
     This particle doesn't exist, or it's private.<br><br>
     <a class="btn" href="browse.html">Browse the gallery</a></div>`;
+}
+
+function previewStateText() {
+  if (row.preview_url) {
+    return row.preview_type === 'image/gif'
+      ? 'an animated GIF is attached — chat apps show it moving.'
+      : 'a clip is attached — chat apps play it in the preview card.';
+  }
+  return 'still thumbnail only. Render a clip and shared links start moving.';
 }
 
 function render() {
@@ -46,6 +56,8 @@ function render() {
       <h1>${esc(row.title)}</h1>
       <button class="btn ${liked ? 'liked' : ''}" id="btn-like" title="${liked ? 'Unlike' : 'Like'}">
         ♥ <span id="like-count">${fmtCount(row.likes)}</span></button>
+      <button class="btn" id="btn-share" title="Copy a link that previews in Discord, Slack and Twitter">
+        ↗ Share</button>
       <a class="btn" href="editor.html?id=${row.id}" title="Open in the editor — publish your changes as your own remix">
         ${isOwner ? '✎ Edit' : '⑂ Open in editor'}</a>
       ${isAdmin ? `
@@ -71,6 +83,13 @@ function render() {
       </select>
       <span style="flex:1"></span>
       <button class="btn small danger" id="btn-delete">Delete…</button>
+    </div>
+    <div class="owner-box">
+      <b>Link preview</b>
+      <span class="muted" id="prev-state">${previewStateText()}</span>
+      <span style="flex:1"></span>
+      <button class="btn small" id="btn-preview">
+        ${row.preview_url ? 'Re-render clip' : 'Render clip'}</button>
     </div>` : ''}
 
     ${row.description ? `<div class="view-desc">${esc(row.description)}</div>` : ''}
@@ -125,7 +144,85 @@ function mountPlayer() {
   });
 }
 
+/** The share dialog. The link points at the Open Graph endpoint rather than
+ *  this page: a crawler asking a static host for view.html gets the same
+ *  <head> whatever the id is, so the preview has to be rendered server-side.
+ *  Clicking it lands right back here. */
+async function showShare() {
+  // Legacy prototype rows live in a different table the preview endpoint
+  // doesn't read, so they only get the plain page link.
+  const share = row.legacy ? api.pageLink(row.id) : api.shareLink(row.id);
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(share);
+    copied = true;
+  } catch { /* no clipboard permission — the input below still works */ }
+
+  const moving = row.preview_url
+    ? 'It embeds the looping clip, so the card plays.'
+    : 'The card shows the thumbnail. '
+      + (api.currentUser()?.id === row.owner
+        ? 'Render a clip below to make it move.'
+        : 'Only the author can add a moving preview.');
+
+  const div = el(`<div>
+    <p>${copied ? 'Link copied to clipboard.' : 'Copy this link:'}</p>
+    <input class="text-in share-url" readonly value="${esc(share)}"
+      style="width:100%;font-family:var(--mono);font-size:12px;margin:8px 0">
+    <p class="muted">Pastes into Discord, Slack, Twitter and the rest as a preview
+      card, and opens this page for anyone who clicks it. ${esc(moving)}</p>
+    <p class="muted small">Plain page link: <a href="${esc(api.pageLink(row.id))}">${esc(api.pageLink(row.id))}</a></p>
+  </div>`);
+  modal('Share', div);
+  const inp = div.querySelector('.share-url');
+  inp.addEventListener('focus', () => inp.select());
+  inp.focus();
+}
+
+/** Re-renders the preview clip from this page, so particles published before
+ *  previews existed (or edited since) can get one without a trip to the
+ *  editor. Owner only — the storage path is keyed to the uploader. */
+async function renderPreview(btn, state) {
+  if (!player?.ok || !player.camera) {
+    return toast('Needs WebGPU — this browser can\'t render the clip.');
+  }
+  btn.disabled = true;
+  const wasPlaying = player.playing;
+  player.stop();                       // free the GPU for the offscreen render
+  try {
+    const clip = await capturePreviewClip({
+      data: row.data,
+      camera: player.camera,
+      onProgress: (p) => {
+        state.textContent = `rendering… ${Math.round(Math.min(1, p) * 100)}%`;
+      },
+    });
+    if (!clip) return;
+    state.textContent = 'uploading…';
+    const url = await api.uploadPreview(row.id, clip);
+    Object.assign(row, {
+      preview_url: url, preview_type: clip.type,
+      preview_w: clip.w, preview_h: clip.h,
+    });
+    btn.textContent = 'Re-render clip';
+    toast('Preview clip updated');
+  } catch (e) {
+    toast(`Failed: ${e.message}`);
+  } finally {
+    // Reads from `row`, so it says the right thing whether or not that update
+    // landed — no path leaves a stale "rendering… 100%" behind.
+    state.textContent = previewStateText();
+    btn.disabled = false;
+    if (wasPlaying) player.start();
+  }
+}
+
 function wireActions(isOwner, isAdmin) {
+  $('btn-share').addEventListener('click', showShare);
+
+  $('btn-preview')?.addEventListener('click', (e) =>
+    renderPreview(e.currentTarget, $('prev-state')));
+
   $('btn-like').addEventListener('click', async () => {
     if (row.legacy) return toast('Legacy effect — likes unavailable');
     if (!(await ensureSignedIn())) return;
