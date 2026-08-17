@@ -121,9 +121,11 @@ tonemapping.
   to your account; re-publishing your own particle updates it in place
 - **Link previews** — paste a particle link into Discord, Slack or Twitter and the card
   shows the title, author, stats and the effect *playing*. Crawlers don't run JavaScript
-  and a static host can't vary `<head>` per particle, so one small Supabase edge function
+  and a static host can't vary `<head>` per particle, so one small function
   ([supabase/functions/og](supabase/functions/og)) renders the Open Graph tags and
-  redirects humans to the real page
+  redirects humans to the real page. It is written for Deno and runs unmodified on
+  Deno Deploy's free tier — *not* on a default `*.supabase.co` function URL, which
+  rewrites HTML responses to `text/plain`
 - Admin curation (★ feature / ☀ particle of the day) straight from particle pages
 
 Setup for all of it is one SQL file + a few dashboard toggles — see

@@ -167,12 +167,15 @@ async function showShare() {
     copied = true;
   } catch { /* no clipboard permission — the input below still works */ }
 
-  const moving = row.preview_url
-    ? 'It embeds the looping clip, so the card plays.'
-    : 'The card shows the thumbnail. '
-      + (api.currentUser()?.id === row.owner
-        ? 'Render a clip below to make it move.'
-        : 'Only the author can add a moving preview.');
+  const moving = !api.previewsConfigured()
+    ? 'Right now it previews with the site card rather than this particle — '
+      + 'per-particle previews need the preview endpoint deployed (see the setup guide).'
+    : row.preview_url
+      ? 'It embeds the looping clip, so the card plays.'
+      : 'The card shows the thumbnail. '
+        + (api.currentUser()?.id === row.owner
+          ? 'Render a clip below to make it move.'
+          : 'Only the author can add a moving preview.');
 
   const div = el(`<div>
     <p>${copied ? 'Link copied to clipboard.' : 'Copy this link:'}</p>
