@@ -205,6 +205,20 @@ supabase functions deploy og</code></pre>
       to accept video (it is safe to re-run).</li>
   </ol>
 
+  <p class="muted">The function reads <code>SUPABASE_URL</code> and
+  <code>SUPABASE_ANON_KEY</code>, which Supabase injects automatically — normally
+  nothing to configure. If your project uses the newer publishable keys and has the
+  legacy anon key disabled, the lookup 401s (visible in the function's logs, and the
+  card falls back to the generic one). Fix it with the same key
+  <code>js/backend.js</code> uses:
+  <code>supabase secrets set PT_ANON_KEY=sb_publishable_…</code></p>
+
+  <p class="muted">If the <code>storage.buckets</code> statement in
+  <code>schema.sql</code> errors on your project, set it by hand instead:
+  <b>Storage → media → Settings</b> → file size limit <code>8 MB</code>, allowed MIME
+  types <code>image/jpeg, image/png, image/webp, image/gif, video/mp4,
+  video/webm</code>.</p>
+
   <p>Check a card without pretending to be a crawler by adding <code>?card=1</code>:</p>
   <pre><code>curl 'https://&lt;ref&gt;.supabase.co/functions/v1/og/&lt;particle-id&gt;?card=1'</code></pre>
 

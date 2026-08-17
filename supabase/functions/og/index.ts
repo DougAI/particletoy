@@ -24,8 +24,13 @@
 const SITE_URL = (Deno.env.get('SITE_URL') || 'https://dougai.github.io/particletoy')
   .replace(/\/+$/, '');
 
+// Supabase injects SUPABASE_URL and SUPABASE_ANON_KEY into every function, so
+// there is normally nothing to configure. PT_ANON_KEY is the escape hatch for
+// projects on the newer publishable keys that have the legacy anon key
+// disabled — set it to the same key js/backend.js uses:
+//     supabase secrets set PT_ANON_KEY=sb_publishable_...
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
+const ANON_KEY = Deno.env.get('PT_ANON_KEY') || Deno.env.get('SUPABASE_ANON_KEY') || '';
 
 const BRAND_COLOR = '#e8a33d';          // Discord paints the embed's edge with it
 const CARD_IMAGE = `${SITE_URL}/img/og-card.jpg`;
@@ -86,7 +91,13 @@ async function fetchParticle(id: string): Promise<Particle | null> {
   const res = await fetch(url, {
     headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    // Shows up in the function's dashboard logs. A 401 here means the anon key
+    // didn't work — see PT_ANON_KEY above. Everything below still degrades to
+    // the generic site card rather than erroring at the crawler.
+    console.error(`particle lookup failed: ${res.status} ${await res.text()}`);
+    return null;
+  }
   const rows = await res.json();
   return rows?.[0] ?? null;
 }
