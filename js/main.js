@@ -532,6 +532,7 @@ async function showPublish() {
           data: payload.data,
           camera,
           pipeline: app.pipeline,
+          allowCompile: true,       // the editor already holds the compiler
           onProgress: (p) => {
             status.textContent = `Rendering link preview… ${Math.round(Math.min(1, p) * 100)}%`;
           },

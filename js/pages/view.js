@@ -193,6 +193,10 @@ async function renderPreview(btn, state) {
     const clip = await capturePreviewClip({
       data: row.data,
       camera: player.camera,
+      // Not allowCompile: this is a gallery page, which must never fetch the
+      // 24 MB Slang compiler. Published effects carry their WGSL — if this one
+      // doesn't, the player above is already saying so.
+      allowCompile: false,
       onProgress: (p) => {
         state.textContent = `rendering… ${Math.round(Math.min(1, p) * 100)}%`;
       },
