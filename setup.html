@@ -219,8 +219,28 @@ supabase functions deploy og</code></pre>
   types <code>image/jpeg, image/png, image/webp, image/gif, video/mp4,
   video/webm</code>.</p>
 
-  <p>Check a card without pretending to be a crawler by adding <code>?card=1</code>:</p>
+  <h3>Checking it</h3>
+  <p><code>?debug=1</code> answers "why is my card wrong" in one request — whether the
+  particle was found, what the database said, and what the card will show:</p>
+  <pre><code>curl 'https://&lt;ref&gt;.supabase.co/functions/v1/og/&lt;particle-id&gt;?debug=1'</code></pre>
+  <ul class="muted">
+    <li><b>Anything but JSON</b> (an error page, "Function not found") — the function
+      isn't deployed under the name <code>og</code>.</li>
+    <li><code>{"code":401}</code> instead of the JSON below — <b>Verify JWT is still
+      on</b>. That is the single most common cause of a link that previews as nothing.</li>
+    <li><code>particleFound: false</code> with <code>restStatus: 200</code> — the
+      particle is <b>private</b>, or the id is wrong. Previews read the database as
+      <code>anon</code>, exactly like a signed-out visitor.</li>
+    <li><code>restStatus: 401</code> — the anon key didn't work; set
+      <code>PT_ANON_KEY</code> (below).</li>
+    <li><code>cardWouldShow</code> tells you whether the card plays a clip, shows a
+      still, or falls back to the generic image.</li>
+  </ul>
+  <p><code>?card=1</code> renders the actual HTML, so you can read the tags:</p>
   <pre><code>curl 'https://&lt;ref&gt;.supabase.co/functions/v1/og/&lt;particle-id&gt;?card=1'</code></pre>
+  <p class="muted">Discord caches an embed per URL for a good while, including the
+  "no embed" result. After a fix, test with a cache-busting query
+  (<code>…/og/&lt;id&gt;?v=2</code>) rather than the URL that already failed.</p>
 
   <p><b>What gets shared.</b> Publishing captures a still thumbnail <em>and</em> a
   ~3-second clip (H.264 where the browser can encode it, WebM otherwise, GIF as a last

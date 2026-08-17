@@ -133,11 +133,11 @@ function ok(name, cond, extra = '') {
   nextRows = [];
   const res = await call(`https://proj.supabase.co/og/${ID}`, DISCORD);
   const html = await res.text();
-  ok('unknown id → 404', res.status === 404);
+  ok('unknown id still embeds (200, not 404)', res.status === 200, String(res.status));
   ok('…but still a valid card', html.includes('<meta property="og:site_name" content="particletoy">'));
 
   const bare = await call('https://proj.supabase.co/og', DISCORD);
-  ok('bare /og → site card', bare.status === 404 &&
+  ok('bare /og → site card', bare.status === 200 &&
      (await bare.text()).includes(`${SITE}/img/og-card.jpg`));
 }
 
@@ -145,7 +145,26 @@ function ok(name, cond, extra = '') {
 {
   globalThis.fetch = async () => { throw new Error('network down'); };
   const res = await call(`https://proj.supabase.co/og/${ID}`, DISCORD);
-  ok('backend failure → site card', res.status === 404);
+  ok('backend failure → site card, still 200', res.status === 200, String(res.status));
+}
+
+// ── 9. ?debug=1 explains itself without leaking the key ────────────────────
+{
+  globalThis.fetch = async () => ({ ok: true, json: async () => [] });
+  const res = await call(`https://proj.supabase.co/og/${ID}?debug=1`, CHROME);
+  const j = await res.json();
+  ok('debug reports not-found', j.particleFound === false && /private/.test(j.note), JSON.stringify(j));
+  ok('debug says what the card shows', j.cardWouldShow.includes('generic'), j.cardWouldShow);
+  ok('debug reports the key as a boolean', j.anonKeySet === true);
+  ok('debug never echoes the key', !JSON.stringify(j).includes('anon-key'), JSON.stringify(j));
+
+  globalThis.fetch = async () => ({ ok: true, json: async () => [ROW] });
+  const j2 = await (await call(`https://proj.supabase.co/og/${ID}?debug=1`, CHROME)).json();
+  ok('debug names the video clip', j2.cardWouldShow.includes('playing clip'), j2.cardWouldShow);
+
+  globalThis.fetch = async () => ({ ok: false, status: 401, text: async () => 'no key' });
+  const j3 = await (await call(`https://proj.supabase.co/og/${ID}?debug=1`, CHROME)).json();
+  ok('debug surfaces a 401', j3.restStatus === 401 && j3.note.includes('401'), j3.note);
 }
 
 console.log(process.exitCode ? '\nFAILED' : '\nall good');
