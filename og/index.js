@@ -368,7 +368,10 @@ export async function handle(req, passedEnv) {
   // the key is reported as present/absent, never echoed.
   if (url.searchParams.has('debug')) {
     const row = found.row;
-    return Response.json({
+    // Hand-rolled rather than Response.json(): this is the tool you reach for
+    // when the endpoint is misbehaving, so it should not itself depend on a
+    // newer runtime API. Pretty-printed because it is read in a terminal.
+    const report = {
       id,
       particleFound: Boolean(row),
       restStatus: found.status,
@@ -384,7 +387,14 @@ export async function handle(req, passedEnv) {
       siteUrl: cfg.site,
       youLookLikeACrawler: isCrawler,
       userAgent: ua,
-    }, { headers: { 'cache-control': 'no-store', 'access-control-allow-origin': '*' } });
+    };
+    return new Response(`${JSON.stringify(report, null, 2)}\n`, {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store',
+        'access-control-allow-origin': '*',
+      },
+    });
   }
 
   if (!isCrawler) {
