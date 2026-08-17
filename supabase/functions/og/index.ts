@@ -226,6 +226,10 @@ function particleCard(p: Particle): string {
       ['twitter:card', 'summary_large_image'],
       ['twitter:image', isGif ? p.preview_url : poster],
     );
+    // Sizing the GIF stops the card being laid out for the 640×360 thumbnail
+    // it isn't. (Whether it animates is up to the reader: Discord shows frame
+    // one, Slack and Telegram play it.)
+    if (isGif) tags.push(['og:image:width', vw], ['og:image:height', vh]);
   }
 
   tags.push(['twitter:title', title], ['twitter:description', description]);

@@ -223,12 +223,20 @@ supabase functions deploy og</code></pre>
   <pre><code>curl 'https://&lt;ref&gt;.supabase.co/functions/v1/og/&lt;particle-id&gt;?card=1'</code></pre>
 
   <p><b>What gets shared.</b> Publishing captures a still thumbnail <em>and</em> a
-  ~3-second clip (H.264 where the browser can encode it, WebM otherwise, animated GIF
-  as a last resort), stored in the <code>media</code> bucket. Discord and Twitter play
-  a direct MP4 given to them as <code>og:video</code>; anything that won't shows the
-  thumbnail instead, so the card is never empty. Particles published before this
-  existed can get a clip from the <b>Link preview → Render clip</b> button on their own
-  page, without a trip to the editor.</p>
+  ~3-second clip (H.264 where the browser can encode it, WebM otherwise, GIF as a last
+  resort), stored in the <code>media</code> bucket. Discord and Twitter play a direct
+  MP4 given to them as <code>og:video</code>; anything that won't shows the thumbnail
+  instead, so the card is never empty. Particles published before this existed can get
+  a clip from the <b>Link preview → Render clip</b> button on their own page, without a
+  trip to the editor.</p>
+
+  <p><b>Video or GIF.</b> The <b>Link preview</b> box has a format picker, and <b>Video
+  is the one that moves in Discord</b>. A GIF sent as <code>og:image</code> gets its
+  first frame shown there — Discord only animates GIFs posted as attachments, not ones
+  it unfurls from a link. GIF is still worth choosing if you mostly share somewhere
+  that does animate them (Slack, Telegram), or if you want one file that renders as an
+  image everywhere; at 640×360 / 12 fps / 3 s it lands around 0.7 MB. Switching format
+  re-renders the clip and replaces the stored one.</p>
 
   <p class="muted">The <b>Share</b> button hands out the function's URL, because that is
   the address a crawler has to fetch for any of this to happen — clicking it lands on

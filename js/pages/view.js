@@ -23,13 +23,18 @@ function notFound() {
     <a class="btn" href="browse.html">Browse the gallery</a></div>`;
 }
 
+/** Says what a shared link will actually embed right now — the one thing you
+ *  can't tell by looking at the page. Deliberately specific about GIF: Discord
+ *  plays an MP4 handed to it as og:video, but shows only the first frame of a
+ *  GIF handed to it as og:image, and "animated GIF" would imply otherwise. */
 function previewStateText() {
-  if (row.preview_url) {
-    return row.preview_type === 'image/gif'
-      ? 'an animated GIF is attached — chat apps show it moving.'
-      : 'a clip is attached — chat apps play it in the preview card.';
+  if (!row.preview_url) {
+    return 'still thumbnail only. Render a clip and shared links start moving.';
   }
-  return 'still thumbnail only. Render a clip and shared links start moving.';
+  return row.preview_type === 'image/gif'
+    ? 'a GIF is attached. It animates where GIFs are supported, but Discord '
+      + 'shows its first frame — switch to Video for motion there.'
+    : 'a video clip is attached — it plays in the card on Discord and Twitter.';
 }
 
 function render() {
@@ -88,6 +93,10 @@ function render() {
       <b>Link preview</b>
       <span class="muted" id="prev-state">${previewStateText()}</span>
       <span style="flex:1"></span>
+      <select id="prev-format" class="btn small" title="What the shared link embeds">
+        <option value="auto" ${row.preview_type === 'image/gif' ? '' : 'selected'}>Video</option>
+        <option value="gif" ${row.preview_type === 'image/gif' ? 'selected' : ''}>GIF</option>
+      </select>
       <button class="btn small" id="btn-preview">
         ${row.preview_url ? 'Re-render clip' : 'Render clip'}</button>
     </div>` : ''}
@@ -197,6 +206,7 @@ async function renderPreview(btn, state) {
       // 24 MB Slang compiler. Published effects carry their WGSL — if this one
       // doesn't, the player above is already saying so.
       allowCompile: false,
+      format: $('prev-format')?.value || 'auto',
       onProgress: (p) => {
         state.textContent = `rendering… ${Math.round(Math.min(1, p) * 100)}%`;
       },

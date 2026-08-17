@@ -93,6 +93,8 @@ function ok(name, cond, extra = '') {
   ok('gif goes in og:image', html.includes('<meta property="og:image" content="https://cdn.example/clip.gif">'));
   ok('gif emits no og:video', !html.includes('og:video'));
   ok('gif uses summary_large_image', html.includes('<meta name="twitter:card" content="summary_large_image">'));
+  ok('gif card is sized', html.includes('<meta property="og:image:width" content="960">')
+     && html.includes('<meta property="og:image:height" content="540">'), '\n' + html);
 }
 
 // ── 3. No preview clip → still image card ──────────────────────────────────
