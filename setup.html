@@ -179,7 +179,7 @@ python serve.py            # then open http://localhost:8917</code></pre>
   <code>&lt;head&gt;</code> no matter which particle you linked, so the card can't be
   built in the browser. Something has to answer that URL with per-particle
   <code>&lt;meta&gt;</code> tags. That something is
-  <code>supabase/functions/og</code>, which looks the particle up as <code>anon</code>
+  <code>og/index.js</code>, which looks the particle up as <code>anon</code>
   (so private ones stay private), renders the tags, and redirects real browsers to the
   actual page.</p>
 
@@ -197,37 +197,43 @@ python serve.py            # then open http://localhost:8917</code></pre>
     dodge it by mislabelling the response; it is an anti-phishing control.</p>
   </div>
 
-  <p>So host it somewhere that serves HTML. The file is written for Deno, so:</p>
+  <p>So host it somewhere that serves HTML. <code>og/index.js</code> is plain
+  JavaScript with no dependencies and no build step, and detects its runtime, so the
+  same file runs on all of the options below — paste it in, set two environment
+  variables, done.</p>
 
+  <h3>Cloudflare Workers (free, has a paste-in editor)</h3>
   <ol>
-    <li><b>Deno Deploy</b> (free, and this file runs unmodified) —
-      <a href="https://deno.com/deploy" target="_blank">deno.com/deploy</a> → new
-      playground → paste <code>supabase/functions/og/index.ts</code> → set two
-      environment variables:
+    <li><a href="https://dash.cloudflare.com" target="_blank">dash.cloudflare.com</a> →
+      <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Start with Hello World</b> →
+      deploy it, then <b>Edit code</b>.</li>
+    <li>Replace the contents with <code>og/index.js</code> and deploy. You get
+      <code>https://&lt;name&gt;.&lt;subdomain&gt;.workers.dev</code>.</li>
+    <li><b>Settings → Variables and Secrets</b>, add two:
       <pre><code>SUPABASE_URL   https://&lt;your-ref&gt;.supabase.co
 PT_ANON_KEY    &lt;your publishable/anon key&gt;</code></pre>
       Both are the same values as the top of <code>js/backend.js</code>. Add
-      <code>SITE_URL</code> too if you host the site anywhere but this repo's GitHub
-      Pages URL. You get <code>https://&lt;name&gt;.deno.dev</code>.</li>
-
+      <code>SITE_URL</code> as well if you host the site anywhere but this repo's
+      GitHub Pages URL.</li>
     <li><b>Point the app at it.</b> In <code>js/backend.js</code>:
-      <pre><code>const SHARE_BASE = 'https://&lt;name&gt;.deno.dev/og';</code></pre>
+      <pre><code>const SHARE_BASE = 'https://&lt;name&gt;.&lt;subdomain&gt;.workers.dev/og';</code></pre>
       There is no default, deliberately — until this is set, Share hands out the plain
       page link, which still previews, just with the site card rather than the
       particle's own.</li>
-
     <li><b>Re-run <code>schema.sql</code></b> if your project predates this feature. It
       adds the <code>preview_*</code> columns and widens the <code>media</code> bucket
       to accept video (it is safe to re-run).</li>
   </ol>
 
-  <p><b>Alternatives.</b> A <b>Cloudflare Worker</b> is equally free but needs a small
-  port — <code>export default { fetch }</code> in place of <code>Deno.serve</code>, and
-  env read from the fetch argument. Or stay on Supabase with the <b>Pro plan plus the
-  Edge Functions custom domain add-on</b>, which lifts the HTML restriction, if you
-  would rather pay than add a service. Deploying there is
-  <code>supabase functions deploy og</code> — with <b>Verify JWT off</b>, since a
-  crawler cannot send an API key and would otherwise get a 401.</p>
+  <p><b>Alternatives.</b> <b>Deno Deploy</b> runs the same file (it picks up the
+  <code>Deno.serve</code> at the bottom instead of the default export); note that
+  Deploy Classic and its playground were retired in July 2026, so use
+  <a href="https://console.deno.com" target="_blank">console.deno.com</a>. Or stay on
+  Supabase with the <b>Pro plan plus the Edge Functions custom domain add-on</b>, which
+  lifts the HTML restriction — copy the file to
+  <code>supabase/functions/og/index.js</code>, deploy with
+  <code>supabase functions deploy og --no-verify-jwt</code>, and keep <b>Verify JWT
+  off</b>, since a crawler cannot send an API key and would otherwise get a 401.</p>
 
   <p class="muted">Outside Supabase nothing is injected for you: set
   <code>SUPABASE_URL</code> and <code>PT_ANON_KEY</code> by hand, or every lookup fails.
@@ -329,8 +335,11 @@ Supabase
   │    featured        POTD + featured grid (admin-only writes)
   ├─ Storage           /media/&lt;uid&gt;/avatar.jpg, /media/&lt;uid&gt;/thumbs/&lt;id&gt;.jpg,
   │                    /media/&lt;uid&gt;/previews/&lt;id&gt;.mp4
-  └─ Edge function     /functions/v1/og/&lt;id&gt; — Open Graph tags for link
-                       crawlers, redirects humans to view.html</code></pre>
+  └─ (storage is also where preview clips live)
+
+og/index.js on Cloudflare Workers / Deno Deploy
+     &lt;base&gt;/&lt;particle-id&gt; — Open Graph tags for link crawlers,
+     redirects humans to view.html. Reads Supabase as anon.</code></pre>
   <ul class="muted">
     <li>Clients can never write counters or <code>is_admin</code> — column-level grants.</li>
     <li>Private particles are filtered by RLS in every query, including embeds.</li>

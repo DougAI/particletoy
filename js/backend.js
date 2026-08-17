@@ -550,17 +550,17 @@ export async function uploadPreview(particleId, clip) {
 // site is static: every particle is the same view.html as far as a crawler is
 // concerned. So the link people share points at the `og` edge function, which
 // renders per-particle Open Graph tags and bounces real browsers on to the
-// page. See supabase/functions/og/index.ts.
+// page. See og/index.js.
 
-// Where supabase/functions/og is deployed, e.g.
-//   'https://particletoy-og.deno.dev/og'
+// Where og/index.js is deployed, e.g.
+//   'https://particletoy-og.<subdomain>.workers.dev/og'
 //
 // Required for per-particle previews, and there is deliberately no default.
 // The obvious one — this project's own /functions/v1/og — cannot work:
 // Supabase rewrites an edge function's text/html response to text/plain to
 // stop its domain serving web pages, and no crawler reads meta tags out of
 // plain text. It has to live somewhere that will serve HTML; see the header
-// of supabase/functions/og/index.ts. Anything answering
+// of og/index.js. Anything answering
 // <base>/<particle-id> with those tags will do.
 const SHARE_BASE = '';
 

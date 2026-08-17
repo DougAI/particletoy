@@ -1,9 +1,11 @@
-// Smoke test for the link-preview endpoint. No dependencies, no install:
+// Smoke test for the link-preview endpoint. No dependencies, no install, no
+// flags:
 //
-//     node --experimental-strip-types supabase/functions/og/index.test.mjs
+//     node og/index.test.mjs
 //
-// Runs the real module under Node with Deno and fetch stubbed out, and checks
-// the tags Discord actually keys off. Nothing here talks to the network.
+// Drives the real handler with fetch stubbed out, checking the tags Discord
+// actually keys off. Nothing here talks to the network. The module is plain
+// JS and runtime-agnostic, so this exercises the exact code that ships.
 import assert from 'node:assert';
 
 const ROW = {
@@ -23,18 +25,14 @@ const ROW = {
   author: { username: 'doug', display_name: 'Doug & Co' },
 };
 
-let handler = null;
 let lastFetchUrl = null;
 let nextRows = [ROW];
 
-globalThis.Deno = {
-  env: {
-    get: (k) => ({
-      SUPABASE_URL: 'https://proj.supabase.co',
-      SUPABASE_ANON_KEY: 'anon-key',
-    })[k],
-  },
-  serve: (h) => { handler = h; },
+// The env a Worker would pass in. Exercising this path also proves the module
+// doesn't depend on Deno being present.
+const ENV = {
+  SUPABASE_URL: 'https://proj.supabase.co',
+  PT_ANON_KEY: 'anon-key',
 };
 
 globalThis.fetch = async (url) => {
@@ -42,10 +40,12 @@ globalThis.fetch = async (url) => {
   return { ok: true, json: async () => nextRows };
 };
 
-await import('./index.ts');
-assert(handler, 'Deno.serve was never called');
+const { handle } = await import('./index.js');
+const mod = (await import('./index.js')).default;
+assert(typeof mod.fetch === 'function', 'no default { fetch } export for Workers');
 
-const call = (url, ua) => handler(new Request(url, { headers: ua ? { 'user-agent': ua } : {} }));
+const call = (url, ua) =>
+  handle(new Request(url, { headers: ua ? { 'user-agent': ua } : {} }), ENV);
 
 const SITE = 'https://dougai.github.io/particletoy';
 const ID = ROW.id;
@@ -161,6 +161,7 @@ function ok(name, cond, extra = '') {
   ok('debug reports not-found', j.particleFound === false && /private/.test(j.note), JSON.stringify(j));
   ok('debug says what the card shows', j.cardWouldShow.includes('generic'), j.cardWouldShow);
   ok('debug reports the key as a boolean', j.anonKeySet === true);
+  ok('debug reports no schema drift', j.previewColumns === 'present', j.previewColumns);
   ok('debug never echoes the key', !JSON.stringify(j).includes('anon-key'), JSON.stringify(j));
 
   globalThis.fetch = async () => ({ ok: true, json: async () => [ROW] });
