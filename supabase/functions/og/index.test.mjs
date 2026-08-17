@@ -167,4 +167,31 @@ function ok(name, cond, extra = '') {
   ok('debug surfaces a 401', j3.restStatus === 401 && j3.note.includes('401'), j3.note);
 }
 
+// ── 10. A database that predates the preview columns still gets a card ─────
+// PostgREST fails the whole query on one unknown column, so the endpoint has
+// to retry without them rather than lose the card entirely.
+{
+  const seen = [];
+  globalThis.fetch = async (url) => {
+    seen.push(String(url));
+    if (String(url).includes('preview_url')) {
+      return { ok: false, status: 400, text: async () => JSON.stringify({
+        code: '42703', message: 'column particles.preview_url does not exist' }) };
+    }
+    const { preview_url, preview_type, preview_w, preview_h, ...base } = ROW;
+    return { ok: true, json: async () => [base] };
+  };
+  const html = await (await call(`https://proj.supabase.co/og/${ID}`, DISCORD)).text();
+  ok('retries without the preview columns', seen.length === 2 && !seen[1].includes('preview_url'),
+     JSON.stringify(seen));
+  ok('still renders the particle card', html.includes('Campfire &lt;script&gt; — by Doug &amp; Co'));
+  ok('still shows the thumbnail',
+     html.includes('<meta property="og:image" content="https://cdn.example/thumb.jpg">'));
+  ok('no video tags without the columns', !html.includes('og:video'));
+
+  const j = await (await call(`https://proj.supabase.co/og/${ID}?debug=1`, CHROME)).json();
+  ok('debug flags the missing columns', j.previewColumns === 'missing', JSON.stringify(j));
+  ok('debug says to re-run schema.sql', /schema\.sql/.test(j.note), j.note);
+}
+
 console.log(process.exitCode ? '\nFAILED' : '\nall good');

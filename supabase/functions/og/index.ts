@@ -44,12 +44,20 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 // as a crawler — several of them send none, and a browser always does.
 const CRAWLER = /bot|crawl|spider|discord|slack|telegram|twitter|facebook|whatsapp|linkedin|mastodon|pinterest|skype|vkshare|embed|preview|curl|wget|http-client|iframely|opengraph|metainspector/i;
 
-const SELECT = [
+// Everything the card needs that has always existed. A project that has not
+// re-run schema.sql since previews landed still answers this.
+const SELECT_BASE = [
   'id', 'title', 'description', 'thumb_url', 'tags',
-  'preview_url', 'preview_type', 'preview_w', 'preview_h',
   'views', 'likes', 'comment_count', 'created_at',
   'author:profiles!owner(username,display_name)',
 ].join(',');
+
+// The clip columns, asked for separately on purpose. PostgREST rejects the
+// whole query if one column is unknown, so folding these into the base list
+// makes a card that could have rendered fine — title, author, thumbnail —
+// fail outright on a database that is merely out of date.
+const PREVIEW_COLS = 'preview_url,preview_type,preview_w,preview_h';
+const SELECT_FULL = `${SELECT_BASE},${PREVIEW_COLS}`;
 
 type Particle = {
   id: string;
@@ -86,31 +94,69 @@ function fmtCount(n: number): string {
   return String(n);
 }
 
-/** Also reports how the lookup went, because "no row" has several very
- *  different causes — wrong key, RLS hiding a private particle, a bad id — and
- *  the card alone can't tell them apart. See ?debug=1. */
-async function fetchParticle(id: string): Promise<{ row: Particle | null; status: number; note: string }> {
-  const url = `${SUPABASE_URL}/rest/v1/particles?id=eq.${id}&select=${encodeURIComponent(SELECT)}`;
+type Lookup = {
+  row: Particle | null;
+  status: number;
+  note: string;
+  previewColumns: 'present' | 'missing' | 'unknown';
+};
+
+async function query(id: string, select: string) {
+  const url = `${SUPABASE_URL}/rest/v1/particles?id=eq.${id}&select=${encodeURIComponent(select)}`;
   const res = await fetch(url, {
     headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
   });
+  return { res, body: res.ok ? null : await res.text() };
+}
+
+/** Also reports how the lookup went, because "no row" has several very
+ *  different causes — wrong key, RLS hiding a private particle, an
+ *  out-of-date database, a bad id — and the card alone can't tell them
+ *  apart. See ?debug=1. */
+async function fetchParticle(id: string): Promise<Lookup> {
+  let { res, body } = await query(id, SELECT_FULL);
+  let previewColumns: Lookup['previewColumns'] = 'present';
+
+  // 42703 = undefined_column: this project hasn't re-run schema.sql since
+  // previews landed. Everything else about the card still works, so drop the
+  // clip columns and render it rather than failing the whole preview.
+  if (!res.ok && /42703|does not exist/.test(body || '')) {
+    console.warn('preview columns missing — re-run supabase/schema.sql. Falling back.');
+    previewColumns = 'missing';
+    ({ res, body } = await query(id, SELECT_BASE));
+  }
+
   if (!res.ok) {
-    const body = await res.text();
     // Shows up in the function's dashboard logs. A 401 here means the anon key
     // didn't work — see PT_ANON_KEY above.
     console.error(`particle lookup failed: ${res.status} ${body}`);
-    return { row: null, status: res.status, note: `REST said ${res.status}: ${body.slice(0, 200)}` };
+    return {
+      row: null,
+      status: res.status,
+      note: `REST said ${res.status}: ${(body || '').slice(0, 200)}`,
+      previewColumns: 'unknown',
+    };
   }
+
   const rows = await res.json();
   if (!rows?.length) {
     return {
       row: null,
       status: res.status,
+      previewColumns,
       note: 'no row — either no particle has that id, or it is private '
         + '(this reads the database as `anon`, so row-level security hides it)',
     };
   }
-  return { row: rows[0], status: res.status, note: 'ok' };
+  return {
+    row: rows[0],
+    status: res.status,
+    previewColumns,
+    note: previewColumns === 'missing'
+      ? 'ok, but the preview_* columns are missing — re-run supabase/schema.sql '
+        + 'or the card can never show a clip'
+      : 'ok',
+  };
 }
 
 function meta(tags: Array<[string, string | number | null | undefined]>): string {
@@ -271,11 +317,14 @@ Deno.serve(async (req: Request) => {
   // seeing the generic one instead of the particle's says where to look.
   if (!id) return new Response(siteCard(), { status: 200, headers });
 
-  let found: { row: Particle | null; status: number; note: string };
+  let found: Lookup;
   try {
     found = await fetchParticle(id);
   } catch (ex) {
-    found = { row: null, status: 0, note: `lookup threw: ${(ex as Error).message}` };
+    found = {
+      row: null, status: 0, previewColumns: 'unknown',
+      note: `lookup threw: ${(ex as Error).message}`,
+    };
   }
 
   // ?debug=1 — what the endpoint saw, in the order worth checking. No secrets:
@@ -292,6 +341,7 @@ Deno.serve(async (req: Request) => {
         : found.row.thumb_url ? 'the still thumbnail — no preview clip rendered yet'
         : 'the generic card image — this particle has no thumbnail either',
       title: found.row?.title ?? null,
+      previewColumns: found.previewColumns,
       anonKeySet: Boolean(ANON_KEY),
       usingPtAnonKey: Boolean(Deno.env.get('PT_ANON_KEY')),
       siteUrl: SITE_URL,
