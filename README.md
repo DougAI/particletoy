@@ -117,12 +117,19 @@ tonemapping.
   owners can flip particles **public/private**, edit, or delete
 - **Browse** ([browse.html](browse.html)) — full-text search, tag filters,
   newest/popular/loved sorting, pagination
-- **Publish from the editor** — captures a thumbnail and saves to your account;
-  re-publishing your own particle updates it in place
+- **Publish from the editor** — captures a thumbnail and a short preview clip and saves
+  to your account; re-publishing your own particle updates it in place
+- **Link previews** — paste a particle link into Discord, Slack or Twitter and the card
+  shows the title, author, stats and the effect *playing*. Crawlers don't run JavaScript
+  and a static host can't vary `<head>` per particle, so one small Supabase edge function
+  ([supabase/functions/og](supabase/functions/og)) renders the Open Graph tags and
+  redirects humans to the real page
 - Admin curation (★ feature / ☀ particle of the day) straight from particle pages
 
 Setup for all of it is one SQL file + a few dashboard toggles — see
-[setup.html](setup.html) / [supabase/schema.sql](supabase/schema.sql).
+[setup.html](setup.html) / [supabase/schema.sql](supabase/schema.sql). Link previews are
+the one part that needs a deploy step (still no build step); they're optional, and
+everything else works without them.
 
 ## Controls
 
@@ -151,4 +158,7 @@ material API wrappers), `js/particles.js` (CPU simulation), `js/simlib.js` +
 `js/gpusim.js` (compute simulation: codegen, runtime, bitonic sort),
 `js/slangc.js` (the Slang → WGSL compile service, sole owner of the wasm),
 `js/wgslcache.js` (compiled WGSL saved with each effect), `js/ui.js` (inspector +
-editor panel).
+editor panel). `js/exportmedia.js` renders clips on a detached canvas — both the
+Export Media downloads and the link-preview clips. `supabase/functions/og` is the
+only server-side code in the project (and `supabase/functions/og/index.test.mjs`
+its only test: `node --experimental-strip-types` it, no install needed).

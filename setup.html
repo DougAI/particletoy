@@ -4,6 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>particletoy — setup guide</title>
+<meta name="description" content="Run particletoy yourself: static hosting plus a free Supabase project for accounts, the gallery and link previews.">
+<!-- Link preview card — see the note in index.html. Absolute by necessity:
+     crawlers don't run JavaScript and don't reliably resolve relative URLs. -->
+<meta property="og:site_name" content="particletoy">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://dougai.github.io/particletoy/setup.html">
+<meta property="og:title" content="particletoy — self-hosting guide">
+<meta property="og:description" content="Run particletoy yourself: static hosting plus a free Supabase project for accounts, the gallery and link previews.">
+<meta property="og:image" content="https://dougai.github.io/particletoy/img/og-card.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#e8a33d">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✨</text></svg>">
 <style>
   :root {
@@ -156,7 +169,81 @@ python serve.py            # then open http://localhost:8917</code></pre>
   Until anything is curated, the front page falls back to the most-loved particles
   automatically, so the site never looks empty.</p>
 
-  <h2><span class="n">6</span>Donate buttons</h2>
+  <h2 id="previews"><span class="n">6</span>Link previews (Discord, Slack, Twitter)</h2>
+  <p>Optional, and the one part that needs more than static files. Paste a particle
+  link into Discord and you want a card with the title, the author and the effect
+  <em>playing</em> — not a bare URL.</p>
+
+  <p>The obstacle: link crawlers don't run JavaScript, and this site is static. A
+  crawler asking GitHub Pages for <code>view.html?id=…</code> gets the same
+  <code>&lt;head&gt;</code> no matter which particle you linked, so the card can't be
+  built in the browser. Something has to answer that URL with per-particle
+  <code>&lt;meta&gt;</code> tags. That something is a small Supabase edge function —
+  <code>supabase/functions/og</code> — which looks the particle up as
+  <code>anon</code> (so private ones stay private), renders the tags, and redirects
+  real browsers to the actual page.</p>
+
+  <ol>
+    <li><b>Deploy it.</b> With the
+      <a href="https://supabase.com/docs/guides/cli" target="_blank">Supabase CLI</a>:
+      <pre><code>supabase link --project-ref &lt;your-project-ref&gt;
+supabase functions deploy og</code></pre>
+      No CLI? <b>Dashboard → Edge Functions → Deploy a new function → via Editor</b>,
+      name it <code>og</code>, paste <code>supabase/functions/og/index.ts</code>, and
+      turn <b>Verify JWT off</b>.</li>
+    <li><b>Verify JWT must be off.</b> Discord can't send an API key, so with it on
+      every crawler gets a 401 and no card. <code>supabase/config.toml</code> sets this
+      for the CLI; the dashboard has a toggle on the function's settings.</li>
+    <li><b>Point it at your site</b>, if you host it anywhere but this repo's GitHub
+      Pages URL:
+      <pre><code>supabase secrets set SITE_URL=https://example.com/particletoy</code></pre>
+      It defaults to <code>https://dougai.github.io/particletoy</code>. The same URL is
+      hard-coded in each page's <code>og:</code> tags for the generic site card —
+      search the HTML files for <code>og:image</code> and change it there too.</li>
+    <li><b>Re-run <code>schema.sql</code></b> if your project predates this feature. It
+      adds the <code>preview_*</code> columns and widens the <code>media</code> bucket
+      to accept video (it is safe to re-run).</li>
+  </ol>
+
+  <p class="muted">The function reads <code>SUPABASE_URL</code> and
+  <code>SUPABASE_ANON_KEY</code>, which Supabase injects automatically — normally
+  nothing to configure. If your project uses the newer publishable keys and has the
+  legacy anon key disabled, the lookup 401s (visible in the function's logs, and the
+  card falls back to the generic one). Fix it with the same key
+  <code>js/backend.js</code> uses:
+  <code>supabase secrets set PT_ANON_KEY=sb_publishable_…</code></p>
+
+  <p class="muted">If the <code>storage.buckets</code> statement in
+  <code>schema.sql</code> errors on your project, set it by hand instead:
+  <b>Storage → media → Settings</b> → file size limit <code>8 MB</code>, allowed MIME
+  types <code>image/jpeg, image/png, image/webp, image/gif, video/mp4,
+  video/webm</code>.</p>
+
+  <p>Check a card without pretending to be a crawler by adding <code>?card=1</code>:</p>
+  <pre><code>curl 'https://&lt;ref&gt;.supabase.co/functions/v1/og/&lt;particle-id&gt;?card=1'</code></pre>
+
+  <p><b>What gets shared.</b> Publishing captures a still thumbnail <em>and</em> a
+  ~3-second clip (H.264 where the browser can encode it, WebM otherwise, animated GIF
+  as a last resort), stored in the <code>media</code> bucket. Discord and Twitter play
+  a direct MP4 given to them as <code>og:video</code>; anything that won't shows the
+  thumbnail instead, so the card is never empty. Particles published before this
+  existed can get a clip from the <b>Link preview → Render clip</b> button on their own
+  page, without a trip to the editor.</p>
+
+  <p class="muted">The <b>Share</b> button hands out the function's URL, because that is
+  the address a crawler has to fetch for any of this to happen — clicking it lands on
+  the normal page. Editor <b>Share</b> links (<code>#s=…</code>) can never preview: the
+  effect rides in the URL fragment, which browsers never send to a server.
+  Interactive embeds aren't possible either — Discord only runs players for a handful of
+  whitelisted providers, so a playing clip is as close as it gets.</p>
+
+  <p class="muted">Prefer your own domain over
+  <code>&lt;ref&gt;.supabase.co/functions/v1/og/…</code>? Anything that answers
+  <code>&lt;base&gt;/&lt;particle-id&gt;</code> with the same tags works — a Cloudflare
+  Worker or Netlify function wrapping the same code. Set <code>SHARE_BASE</code> in
+  <code>js/backend.js</code> and the app hands out that address instead.</p>
+
+  <h2><span class="n">7</span>Donate buttons</h2>
   <p>The front page shows PayPal and Patreon buttons. Point them at your real pages in
   <code>js/site.js</code>:</p>
   <pre><code>export const LINKS = {
@@ -167,7 +254,7 @@ python serve.py            # then open http://localhost:8917</code></pre>
   <p class="muted">PayPal: paypal.com → Pay &amp; Get Paid → Donate button → create,
   copy the hosted button id. Patreon: your creator page URL.</p>
 
-  <h2><span class="n">7</span>How the pieces fit</h2>
+  <h2><span class="n">8</span>How the pieces fit</h2>
   <pre><code>Browser (static pages on GitHub Pages)
   │  fetch() — plain REST, no SDK
   ▼
@@ -179,7 +266,10 @@ Supabase
   │                    views/likes/comment_count (trigger-maintained)
   │    likes, comments counters + in-app notifications via triggers
   │    featured        POTD + featured grid (admin-only writes)
-  └─ Storage           /media/&lt;uid&gt;/avatar.jpg, /media/&lt;uid&gt;/thumbs/&lt;id&gt;.jpg</code></pre>
+  ├─ Storage           /media/&lt;uid&gt;/avatar.jpg, /media/&lt;uid&gt;/thumbs/&lt;id&gt;.jpg,
+  │                    /media/&lt;uid&gt;/previews/&lt;id&gt;.mp4
+  └─ Edge function     /functions/v1/og/&lt;id&gt; — Open Graph tags for link
+                       crawlers, redirects humans to view.html</code></pre>
   <ul class="muted">
     <li>Clients can never write counters or <code>is_admin</code> — column-level grants.</li>
     <li>Private particles are filtered by RLS in every query, including embeds.</li>
@@ -189,7 +279,7 @@ Supabase
         thumbnails are only the static fallback, captured on publish.</li>
   </ul>
 
-  <h2><span class="n">8</span>Costs, limits, growth</h2>
+  <h2><span class="n">9</span>Costs, limits, growth</h2>
   <ul>
     <li><b>Free tier</b>: 500 MB database + 1 GB storage + 50k monthly active users —
         plenty for a hobby community. Effects are ~2–30 KB each.</li>

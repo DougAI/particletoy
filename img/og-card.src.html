@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<!--
+  Source for og-card.jpg — the site-wide link preview card (the one shown for
+  index.html, browse.html and friends; individual particles get their own from
+  supabase/functions/og). Edit this, then re-shoot it at exactly 1200×630:
+
+    chrome --headless --window-size=1200,630 --hide-scrollbars \
+           --virtual-time-budget=3000 --screenshot=img/og-card.jpg \
+           file://$PWD/img/og-card.src.html
+
+  (Chromium picks the encoder from the output extension, so .jpg gets a JPEG.)
+  The plume is drawn with a seeded PRNG, so re-shooting it reproduces the same
+  image rather than a new random one.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    background:
+      radial-gradient(900px 520px at 74% 46%, rgba(232, 163, 61, 0.13), transparent 62%),
+      radial-gradient(760px 420px at 8% 6%, rgba(77, 159, 255, 0.10), transparent 62%),
+      #0d0e11;
+    color: #d7dae0;
+    font: 14px/1.5 -apple-system, "Segoe UI", "DejaVu Sans", system-ui, sans-serif;
+    position: relative;
+  }
+  canvas { position: absolute; inset: 0; }
+  .copy {
+    position: absolute;
+    left: 72px; top: 0; bottom: 0; width: 640px;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .brand { font-size: 68px; font-weight: 700; letter-spacing: -1.5px; color: #f2f4f8; }
+  .brand b { color: #e8a33d; }
+  h1 {
+    margin-top: 22px;
+    font-size: 40px; line-height: 1.18; font-weight: 600; letter-spacing: -0.6px;
+    color: #eceef3;
+  }
+  h1 em { font-style: normal; color: #e8a33d; }
+  p { margin-top: 22px; font-size: 22px; line-height: 1.45; color: #8b909c; max-width: 560px; }
+  .chips { margin-top: 34px; display: flex; gap: 10px; }
+  .chip {
+    font-size: 17px; padding: 8px 16px; border-radius: 999px;
+    border: 1px solid #262a33; background: #191c22; color: #a8adb8;
+  }
+  .chip.hot { border-color: #4a3a20; background: #221a10; color: #e8a33d; }
+  .edge { position: absolute; left: 0; right: 0; bottom: 0; height: 5px;
+          background: linear-gradient(90deg, #e8a33d, #4d9fff); }
+</style>
+</head>
+<body>
+<canvas id="c" width="1200" height="630"></canvas>
+<div class="copy">
+  <div class="brand">particle<b>toy</b></div>
+  <h1>Build <em>and</em> share<br>realtime particle effects</h1>
+  <p>A shadertoy-style playground for game-engine-grade particles — right in the browser.</p>
+  <div class="chips">
+    <span class="chip hot">WebGPU</span>
+    <span class="chip">Slang shaders</span>
+    <span class="chip">PBR</span>
+    <span class="chip">GPU compute</span>
+  </div>
+</div>
+<div class="edge"></div>
+<script>
+  // A deterministic campfire-ish plume, drawn additively — the same kind of
+  // thing the app itself makes, so the card looks like the product.
+  const ctx = document.getElementById('c').getContext('2d');
+  let seed = 20240817;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+
+  const CX = 895, CY = 400;
+  ctx.globalCompositeOperation = 'lighter';
+
+  function blob(x, y, r, [cr, cg, cb], a) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(${cr},${cg},${cb},${a})`);
+    g.addColorStop(0.45, `rgba(${cr},${cg},${cb},${a * 0.35})`);
+    g.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Glow at the base.
+  blob(CX, CY + 60, 300, [232, 120, 40], 0.30);
+  blob(CX, CY + 70, 150, [255, 190, 90], 0.28);
+
+  // Rising particles: life 0 (hot, tight, bright) → 1 (cool, wide, faint).
+  for (let i = 0; i < 620; i++) {
+    const life = Math.pow(rnd(), 0.62);
+    const spread = 18 + life * 165;
+    const swirl = Math.sin(life * 7.5 + i * 0.31) * spread * 0.55;
+    const x = CX + swirl + (rnd() - 0.5) * spread * 0.9;
+    const y = CY + 130 - life * 470 + (rnd() - 0.5) * 26;
+    const r = 4 + life * 17 + rnd() * 5;
+    const heat = 1 - life;
+    const col = [
+      255,
+      Math.round(90 + heat * 150 + rnd() * 30),
+      Math.round(20 + heat * 90 + (1 - heat) * 40),
+    ];
+    blob(x, y, r, col, 0.10 + heat * 0.34);
+  }
+
+  // A few cool sparks drifting off, for the blue accent.
+  for (let i = 0; i < 70; i++) {
+    const t = rnd();
+    const x = CX + (rnd() - 0.5) * 620;
+    const y = CY - 40 - t * 380 + (rnd() - 0.5) * 120;
+    blob(x, y, 2 + rnd() * 4, [140, 190, 255], 0.10 + rnd() * 0.30);
+  }
+</script>
+</body>
+</html>

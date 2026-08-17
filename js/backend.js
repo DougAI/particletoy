@@ -505,13 +505,13 @@ export async function markAllRead() {
 
 // ─── storage ────────────────────────────────────────────────────────────────
 
-async function uploadMedia(path, blob) {
+async function uploadMedia(path, blob, contentType) {
   const res = await fetch(`${SUPABASE_URL}/storage/v1/object/media/${path}`, {
     method: 'POST',
     headers: {
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${session.access_token}`,
-      'Content-Type': blob.type || 'image/jpeg',
+      'Content-Type': contentType || blob.type || 'image/jpeg',
       'x-upsert': 'true',
     },
     body: blob,
@@ -526,7 +526,45 @@ export async function uploadAvatar(blob) {
 }
 
 export async function uploadThumb(particleId, blob) {
-  const url = await uploadMedia(`${session.user.id}/thumbs/${particleId}.jpg`, blob);
+  const url = await uploadMedia(`${session.user.id}/thumbs/${particleId}.jpg`, blob, 'image/jpeg');
   await updateParticle(particleId, { thumb_url: url });
   return url;
+}
+
+/** The short looping clip that link previews embed.
+ *  @param clip { blob, type, ext, w, h } from exportmedia.capturePreviewClip */
+export async function uploadPreview(particleId, clip) {
+  const path = `${session.user.id}/previews/${particleId}.${clip.ext}`;
+  const url = await uploadMedia(path, clip.blob, clip.type);
+  await updateParticle(particleId, {
+    preview_url: url,
+    preview_type: clip.type,
+    preview_w: clip.w,
+    preview_h: clip.h,
+  });
+  return url;
+}
+
+// ─── share links ────────────────────────────────────────────────────────────
+// A link crawler (Discord, Slack, Twitter) does not run JavaScript, and this
+// site is static: every particle is the same view.html as far as a crawler is
+// concerned. So the link people share points at the `og` edge function, which
+// renders per-particle Open Graph tags and bounces real browsers on to the
+// page. See supabase/functions/og/index.ts.
+
+// Set this if the previews are served from somewhere prettier — a Cloudflare
+// Worker or Netlify function on your own domain, say. Anything that answers
+// <base>/<particle-id> with Open Graph tags will do.
+const SHARE_BASE = '';
+
+/** The link to hand to Discord et al. Falls back to the plain page link when
+ *  the backend isn't configured at all. */
+export function shareLink(particleId) {
+  if (!backendConfigured()) return pageLink(particleId);
+  return `${SHARE_BASE || `${SUPABASE_URL}/functions/v1/og`}/${particleId}`;
+}
+
+/** The particle's page on this site. */
+export function pageLink(particleId) {
+  return new URL(`view.html?id=${particleId}`, location.href).href;
 }

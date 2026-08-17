@@ -12,7 +12,7 @@
 --   comments       flat comment threads on particles
 --   featured       curation: particle-of-the-day + featured grid (admin only)
 --   notifications  in-app "someone liked/commented" inbox
---   media bucket   public storage for avatars + thumbnails
+--   media bucket   public storage for avatars, thumbnails + preview clips
 --   + RLS policies, counter triggers, view-count RPC, account deletion RPC
 -- ═══════════════════════════════════════════════════════════════════════════
 
@@ -40,6 +40,14 @@ create table if not exists public.particles (
                 check (array_length(tags, 1) is null or array_length(tags, 1) <= 12),
   data          jsonb not null check (pg_column_size(data) < 400000),
   thumb_url     text,
+  -- A short looping clip (MP4 / WebM, or an animated GIF where the browser
+  -- can't record video) captured at publish time. It is what link-preview
+  -- crawlers embed — see supabase/functions/og.
+  preview_url   text,
+  preview_type  text check (preview_type is null or
+                            preview_type in ('video/mp4', 'video/webm', 'image/gif')),
+  preview_w     integer,
+  preview_h     integer,
   visibility    text not null default 'public' check (visibility in ('public', 'private')),
   views         integer not null default 0,
   likes         integer not null default 0,
@@ -47,6 +55,19 @@ create table if not exists public.particles (
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
+
+-- "create table if not exists" skips a table that already exists, so columns
+-- added after the first release need spelling out for existing projects.
+alter table public.particles add column if not exists preview_url  text;
+alter table public.particles add column if not exists preview_type text;
+alter table public.particles add column if not exists preview_w    integer;
+alter table public.particles add column if not exists preview_h    integer;
+do $$ begin
+  alter table public.particles add constraint particles_preview_type_check
+    check (preview_type is null or
+           preview_type in ('video/mp4', 'video/webm', 'image/gif'));
+exception when duplicate_object then null;
+end $$;
 
 create index if not exists particles_pub_created on public.particles (visibility, created_at desc);
 create index if not exists particles_pub_views   on public.particles (visibility, views desc);
@@ -187,9 +208,11 @@ grant insert (id, username, display_name, avatar_url, bio)
 grant update (display_name, avatar_url, bio, notify_comments, notify_likes)
   on public.profiles to authenticated;
 
-grant insert (title, description, tags, data, visibility, thumb_url)
+grant insert (title, description, tags, data, visibility, thumb_url,
+              preview_url, preview_type, preview_w, preview_h)
   on public.particles to authenticated;
-grant update (title, description, tags, data, visibility, thumb_url)
+grant update (title, description, tags, data, visibility, thumb_url,
+              preview_url, preview_type, preview_w, preview_h)
   on public.particles to authenticated;
 
 grant insert (particle_id)       on public.likes    to authenticated;
@@ -235,7 +258,9 @@ create trigger on_auth_user_created
   for each row execute function public.handle_new_user();
 
 -- Bump updated_at only when actual content changes (not when triggers below
--- touch the counters).
+-- touch the counters, and not when a preview clip is re-rendered — that is
+-- housekeeping, and it shouldn't shove the particle up the "recently edited"
+-- list or make the view page claim it was edited).
 create or replace function public.touch_particle()
 returns trigger language plpgsql as $$
 begin
@@ -332,10 +357,18 @@ revoke execute on function public.delete_account() from public, anon;
 grant execute on function public.delete_account() to authenticated;
 
 
--- ═══ Storage: public "media" bucket (avatars + thumbnails) ══════════════════
+-- ═══ Storage: public "media" bucket (avatars, thumbnails, preview clips) ════
+-- The limit covers a few seconds of 960×540 video; avatars and thumbnails are
+-- a rounding error next to it. "do update" rather than "do nothing" so an
+-- existing bucket picks up the video mime types when this file is re-run.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('media', 'media', true, 1048576, array['image/jpeg', 'image/png', 'image/webp'])
-on conflict (id) do nothing;
+values ('media', 'media', true, 8388608,
+        array['image/jpeg', 'image/png', 'image/webp', 'image/gif',
+              'video/mp4', 'video/webm'])
+on conflict (id) do update
+  set public             = excluded.public,
+      file_size_limit    = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
 
 -- Anyone can read; signed-in users can write only inside their own /<uid>/ folder.
 -- (If CREATE POLICY on storage.objects errors in your project, create these two
@@ -349,6 +382,9 @@ create policy "media write own" on storage.objects for all to authenticated
 
 
 -- ═══ Afterwards (manual, optional) ══════════════════════════════════════════
+-- Rich link previews (Discord / Slack / Twitter cards) need one more piece —
+-- the edge function in supabase/functions/og. See setup.html § Link previews.
+--
 -- Make yourself an admin (enables the ★ Feature / ☀ POTD buttons on view pages):
 --   update public.profiles set is_admin = true where username = 'your_username';
 --

@@ -15,7 +15,9 @@ import {
 } from './share.js';
 import * as api from './backend.js';
 import { captureCanvasJPEG } from './player.js';
-import { exportVideo, exportGif, getVideoMimeType, MAX_EXPORT_SECONDS } from './exportmedia.js';
+import {
+  exportVideo, exportGif, getVideoMimeType, capturePreviewClip, MAX_EXPORT_SECONDS,
+} from './exportmedia.js';
 
 const canvas = document.getElementById('gl');
 const { device, context, format, error: gpuError } = await createGPU(canvas);
@@ -335,6 +337,13 @@ function wireToolbar() {
     note.className = 'muted';
     note.textContent = `The whole effect (${Math.round(str.length / 1024 * 10) / 10} KB) lives in the URL — no server involved.`;
     div.appendChild(note);
+    // The effect rides in the fragment, which browsers never send to a server,
+    // so nothing on the other end can render a preview card for this link.
+    const note2 = document.createElement('p');
+    note2.className = 'muted';
+    note2.innerHTML = 'Chat apps show it as a plain link. <b>Publish</b> instead for a '
+      + 'link that previews with a playing clip in Discord, Slack and Twitter.';
+    div.appendChild(note2);
     modal('Share Effect', div);
     inp.focus();
   });
@@ -477,7 +486,8 @@ async function showPublish() {
       <input type="checkbox" id="pub-copy"> <span>Publish as a new copy instead of updating</span></label>` : ''}
     <p id="pub-err" class="muted" style="color:var(--danger);min-height:16px"></p>
     <button id="pub-go" class="btn btn-accent">${owner ? 'Save changes' : 'Publish'}</button>
-    <span class="muted"> A thumbnail is captured from the current view.</span>
+    <span class="muted"> A thumbnail and a short preview clip are captured from the current view.</span>
+    <p id="pub-status" class="muted" style="min-height:16px"></p>
     <div id="pub-done" style="margin-top:10px"></div>`;
   modal(owner ? 'Save to gallery' : 'Publish to gallery', div, { wide: true });
 
@@ -489,6 +499,7 @@ async function showPublish() {
   div.querySelector('#pub-go').addEventListener('click', async () => {
     const err = div.querySelector('#pub-err');
     const go = div.querySelector('#pub-go');
+    const status = div.querySelector('#pub-status');
     go.disabled = true;
     err.textContent = '';
     try {
@@ -507,23 +518,58 @@ async function showPublish() {
       } else {
         ({ id } = await api.createParticle(payload));
       }
+      status.textContent = 'Capturing thumbnail…';
       const thumb = await captureCanvasJPEG(canvas, () => frame(performance.now()));
       if (thumb) await api.uploadThumb(id, thumb).catch(() => {});
+
+      // The looping clip link previews embed. It renders offscreen and takes a
+      // few seconds, and the particle is already saved by now — so a failure
+      // here costs the rich preview, never the publish.
+      status.textContent = 'Rendering link preview… 0%';
+      let clipOk = false;
+      try {
+        const clip = await capturePreviewClip({
+          data: payload.data,
+          camera,
+          pipeline: app.pipeline,
+          allowCompile: true,       // the editor already holds the compiler
+          onProgress: (p) => {
+            status.textContent = `Rendering link preview… ${Math.round(Math.min(1, p) * 100)}%`;
+          },
+        });
+        if (clip) {
+          status.textContent = 'Uploading link preview…';
+          await api.uploadPreview(id, clip);
+          clipOk = true;
+        }
+      } catch (ex) {
+        console.warn('preview clip failed', ex);
+      }
+      status.textContent = '';
 
       app.name = title;
       document.getElementById('fx-name').value = title;
       Object.assign(cloud, { id, owner: api.currentUser().id, description, tags, visibility });
       updatePublishButton();
 
-      const url = new URL(`view.html?id=${id}`, location.href).href;
+      const url = api.pageLink(id);
+      const share = api.shareLink(id);
       div.querySelector('#pub-done').innerHTML =
         `<p>✔ ${owner && !asCopy ? 'Saved' : 'Published'} — <a href="${url}">open its page ↗</a></p>
-         <input class="text-in share-url" readonly value="${url}">`;
+         <p class="muted">Share link — pastes into Discord, Slack or Twitter as a
+           ${clipOk ? 'playable preview card' : 'preview card'}, and opens the page for
+           anyone who clicks it:</p>
+         <input class="text-in share-url" readonly value="${share}">
+         ${clipOk ? '' : `<p class="muted">The preview clip didn't render, so the card
+           will show the still thumbnail. You can retry from the particle's page
+           (<b>Link preview → Render clip</b>).</p>`}`;
+      div.querySelector('.share-url').addEventListener('focus', (e) => e.target.select());
       toast(owner && !asCopy ? 'Saved to gallery' : 'Published!');
     } catch (ex) {
       err.textContent = ex.message;
     } finally {
       go.disabled = false;
+      status.textContent = '';
     }
   });
 }
