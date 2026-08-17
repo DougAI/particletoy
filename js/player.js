@@ -25,11 +25,16 @@ export class EffectPlayer {
   /** @param canvas target canvas
    *  @param opts   { interactive: orbit camera on drag (default true),
    *                  pipeline: 'deferred' | 'forward',
-   *                  maxDpr: devicePixelRatio cap (default 1.5) } */
-  constructor(canvas, { interactive = true, pipeline = 'deferred', maxDpr = 1.5 } = {}) {
+   *                  maxDpr: devicePixelRatio cap (default 1.5),
+   *                  allowCompile: fall back to the Slang compiler when the
+   *                    effect carries no usable WGSL (default false — the
+   *                    gallery pages must never fetch the 24 MB compiler; the
+   *                    editor's media export, which already has it, opts in) } */
+  constructor(canvas, { interactive = true, pipeline = 'deferred', maxDpr = 1.5, allowCompile = false } = {}) {
     this.canvas = canvas;
     this.pipeline = pipeline;
     this.maxDpr = maxDpr;
+    this.allowCompile = allowCompile;
     this.playing = false;
     this.time = 0;
     this.raf = 0;
@@ -71,13 +76,15 @@ export class EffectPlayer {
     this._clear();
 
     // The player is embedded in the gallery pages, which must never pull down
-    // the 24 MB Slang compiler just to animate a hover preview. It renders
-    // only from the WGSL saved with the effect; anything else (a pre-Slang
-    // effect, or one published without a cache) reports rather than compiles.
+    // the 24 MB Slang compiler just to animate a hover preview. There it
+    // renders only from the WGSL saved with the effect; anything else (a
+    // pre-Slang effect, or one published without a cache) reports rather than
+    // compiles. Callers that already hold the compiler — the editor's media
+    // export — pass allowCompile and get the source path as a fallback.
     this.renderer.wgslCache = data.wgslCache ?? null;
-    this.renderer.allowCompile = false;
+    this.renderer.allowCompile = this.allowCompile;
     this.unrenderable = isPreSlang(data) ? 'made with an older shader language'
-      : !data.wgslCache ? 'saved without compiled shaders'
+      : !data.wgslCache && !this.allowCompile ? 'saved without compiled shaders'
       : null;
 
     const materials = (data.materials || []).map((m) => ({ ...makeMaterial({}), ...m }));
