@@ -251,12 +251,48 @@ export async function exportGif(opts) {
 // a crawler fetches it before it will show anything, and a 3-second 960×540
 // H.264 clip lands around a megabyte.
 
-const PREVIEW_VIDEO = { w: 960, h: 540, fps: 30, seconds: 3.5, preroll: 1.5, bitrate: 2_500_000 };
+const PREVIEW_VIDEO = { w: 960, h: 540, fps: 30, seconds: 3.5, bitrate: 2_500_000 };
 // The fallback when no video codec works out, and what you get if you ask for
 // GIF outright. Lower and slower than the video because GIF costs far more per
 // second of motion — though less than you would think for this subject:
 // particles on black quantize well, and these settings measure ~0.7 MB.
-const PREVIEW_GIF = { w: 640, h: 360, fps: 12, seconds: 3, preroll: 1.5 };
+const PREVIEW_GIF = { w: 640, h: 360, fps: 12, seconds: 3 };
+
+// How long a continuous effect gets to fill the frame before recording starts.
+const PREVIEW_PREROLL = 1.5;
+
+/**
+ * How far to run this particular effect before the first recorded frame.
+ *
+ * A steady emitter has nothing on screen at t = 0 and needs a moment to fill,
+ * so a clip that starts there opens on an empty frame and wastes the seconds
+ * that make the impression. A burst or a one-shot is the exact opposite: its
+ * opening instant is the whole effect, and skipping into it throws away the
+ * part worth showing. Same preroll, opposite outcomes — so it has to be read
+ * off the effect rather than fixed.
+ *
+ * @param data    a serialized effect
+ * @param seconds the preroll to use when nothing argues against it
+ */
+export function prerollFor(data, seconds = PREVIEW_PREROLL) {
+  const emitters = (data?.emitters || []).filter((e) => e?.enabled !== false);
+  if (!emitters.length) return 0;
+
+  // A one-shot plays once and is over. Whatever it does, it does from the
+  // start, so start where it starts.
+  if (emitters.some((e) => e.looping === false)) return 0;
+
+  // Never run past the first burst — that flash is the point of it. A burst
+  // later in the timeline is no reason to open on an empty frame, so this
+  // clamps rather than zeroes.
+  let limit = seconds;
+  for (const e of emitters) {
+    for (const b of e.spawn?.bursts || []) {
+      limit = Math.min(limit, Math.max(0, b.time ?? 0));
+    }
+  }
+  return limit;
+}
 
 // Storage matches the bucket's mime whitelist against the Content-Type header
 // verbatim, and "video/mp4;codecs=h264" is not "video/mp4" to it. .slice()
@@ -292,7 +328,12 @@ export async function capturePreviewClip(opts) {
     data, camera, pipeline = 'deferred', allowCompile = false,
     format = 'auto', onProgress, signal,
   } = opts;
-  const common = { data, camera, pipeline, allowCompile, onProgress, signal };
+  // Read off the effect, not fixed: see prerollFor. Named apart from the
+  // preroll() stepper above so neither shadows the other.
+  const prerollSeconds = prerollFor(data);
+  const common = {
+    data, camera, pipeline, allowCompile, preroll: prerollSeconds, onProgress, signal,
+  };
 
   if (format !== 'gif') {
     // Walk the list rather than taking the first "yes": a codec can pass
