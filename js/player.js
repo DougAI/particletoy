@@ -157,8 +157,14 @@ export class EffectPlayer {
   }
 
   /** Renders a frame right now and returns a JPEG blob. Waits for the device
-   *  and material pipelines so the first capture isn't black. */
-  async captureJPEG(w = 640, h = 360, quality = 0.85) {
+   *  and material pipelines so the first capture isn't black.
+   *
+   *  1200x630 is Open Graph's canonical card size and clears LinkedIn's
+   *  documented 1200x627 minimum, below which it declines to build a card at
+   *  all. Particles on black compress so well that the larger frame costs
+   *  ~33 KB against ~14 KB for 640x360 — cheap enough that the gallery grid,
+   *  which lazy-loads these, can share the one image. */
+  async captureJPEG(w = 1200, h = 630, quality = 0.85) {
     if (!(await this.ready)) return null;
     await this._loading;
     this._last = performance.now() - 16;
@@ -199,8 +205,9 @@ export function drawCover(ctx, src, w, h) {
 }
 
 /** Capture a JPEG thumbnail from a live (already-rendering) canvas whose frame
- *  function can be invoked synchronously — used by the editor's publish flow. */
-export function captureCanvasJPEG(canvas, renderFrameNow, w = 640, h = 360, quality = 0.85) {
+ *  function can be invoked synchronously — used by the editor's publish flow.
+ *  See captureJPEG above for why 1200x630. */
+export function captureCanvasJPEG(canvas, renderFrameNow, w = 1200, h = 630, quality = 0.85) {
   return new Promise((resolve) => {
     renderFrameNow();
     const out = document.createElement('canvas');

@@ -292,13 +292,29 @@ python serve.py            # then open http://localhost:8917</code></pre>
   a clip from the <b>Link preview → Render clip</b> button on their own page, without a
   trip to the editor.</p>
 
-  <p><b>Video or GIF.</b> The <b>Link preview</b> box has a format picker, and <b>Video
-  is the one that moves in Discord</b>. A GIF sent as <code>og:image</code> gets its
-  first frame shown there — Discord only animates GIFs posted as attachments, not ones
-  it unfurls from a link. GIF is still worth choosing if you mostly share somewhere
-  that does animate them (Slack, Telegram), or if you want one file that renders as an
-  image everywhere; at 640×360 / 12 fps / 3 s it lands around 0.7 MB. Switching format
-  re-renders the clip and replaces the stored one.</p>
+  <p><b>Video or GIF.</b> The <b>Link preview</b> box has a format picker, and
+  <b>Video is the compatible choice</b>. It stores an MP4 for <code>og:video</code>,
+  which Discord and Twitter play inline, and leaves the 1200×630 still as the
+  <code>og:image</code> that every other platform uses. GIF instead becomes the
+  <code>og:image</code> itself: it animates on Slack and Telegram, shows as a first
+  frame on Discord, and is skipped by LinkedIn for being under its minimum card size.
+  Switching format re-renders the clip, replaces the stored one, and refreshes the
+  still.</p>
+
+  <h3>What each platform actually does</h3>
+  <table>
+    <tr><th>Platform</th><th>Video preview</th><th>GIF preview</th></tr>
+    <tr><td>Discord</td><td>plays the clip</td><td>first frame</td></tr>
+    <tr><td>Slack / Telegram</td><td>still image</td><td>animates</td></tr>
+    <tr><td>Twitter / X</td><td>plays the clip</td><td>first frame</td></tr>
+    <tr><td>Bluesky</td><td>still image</td><td>first frame</td></tr>
+    <tr><td>LinkedIn</td><td>still image</td><td>no card — under size</td></tr>
+  </table>
+  <p class="muted">Nowhere renders the live effect: interactive embeds are limited to
+  each platform's own list of providers, so a playing clip is as close as it gets.
+  LinkedIn also caches hard — use its
+  <a href="https://www.linkedin.com/post-inspector/" target="_blank">Post Inspector</a>
+  to force a re-fetch rather than assuming a fix didn't work.</p>
 
   <p class="muted">The <b>Share</b> button hands out the function's URL, because that is
   the address a crawler has to fetch for any of this to happen — clicking it lands on

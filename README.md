@@ -162,5 +162,6 @@ material API wrappers), `js/particles.js` (CPU simulation), `js/simlib.js` +
 `js/wgslcache.js` (compiled WGSL saved with each effect), `js/ui.js` (inspector +
 editor panel). `js/exportmedia.js` renders clips on a detached canvas — both the
 Export Media downloads and the link-preview clips. `og/index.js` is the only
-server-side code in the project (and `og/index.test.mjs` its only test:
-`node og/index.test.mjs`, no install, no flags).
+server-side code in the project. Two dependency-free test files, run with plain
+`node` and no install: `og/index.test.mjs` (the Open Graph tag contract) and
+`js/exportmedia.test.mjs` (how much of an effect a preview clip skips).

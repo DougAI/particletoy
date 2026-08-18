@@ -32,9 +32,11 @@ function previewStateText() {
     return 'still thumbnail only. Render a clip and shared links start moving.';
   }
   return row.preview_type === 'image/gif'
-    ? 'a GIF is attached. It animates where GIFs are supported, but Discord '
-      + 'shows its first frame — switch to Video for motion there.'
-    : 'a video clip is attached — it plays in the card on Discord and Twitter.';
+    ? 'a GIF is attached. It animates on Slack and Telegram, but Discord shows '
+      + 'its first frame and LinkedIn skips it for being under card size — '
+      + 'Video is the compatible choice.'
+    : 'a video clip is attached — it plays in the card on Discord and Twitter, '
+      + 'and the still stands in everywhere else.';
 }
 
 function render() {
@@ -221,8 +223,22 @@ async function renderPreview(btn, state) {
       preview_url: url, preview_type: clip.type,
       preview_w: clip.w, preview_h: clip.h,
     });
+
+    // Refresh the still as well. It is the poster frame for the clip and the
+    // og:image everywhere that won't play video, and anything published before
+    // thumbnails moved to 1200x630 is under LinkedIn's minimum — which it
+    // answers by declining to build a card at all. Failing here costs the
+    // bigger still, not the clip that was just stored.
+    try {
+      state.textContent = 'refreshing thumbnail…';
+      const thumb = await player.captureJPEG();
+      if (thumb) row.thumb_url = await api.uploadThumb(row.id, thumb);
+    } catch (e) {
+      console.warn('thumbnail refresh failed', e);
+    }
+
     btn.textContent = 'Re-render clip';
-    toast('Preview clip updated');
+    toast('Preview updated');
   } catch (e) {
     toast(`Failed: ${e.message}`);
   } finally {
