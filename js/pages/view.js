@@ -26,16 +26,21 @@ function notFound() {
 /** Says what a shared link will actually embed right now — the one thing you
  *  can't tell by looking at the page. Deliberately specific about GIF: Discord
  *  plays an MP4 handed to it as og:video, but shows only the first frame of a
- *  GIF handed to it as og:image, and "animated GIF" would imply otherwise. */
+ *  GIF handed to it as og:image, and "animated GIF" would imply otherwise.
+ *
+ *  X is left out of all three: it runs the effect live in the card whatever is
+ *  stored here, so saying anything about the clip would only confuse what the
+ *  button in front of you actually changes. */
 function previewStateText() {
   if (!row.preview_url) {
-    return 'still thumbnail only. Render a clip and shared links start moving.';
+    return 'still thumbnail only. Render a clip and shared links start moving '
+      + 'on Discord and the rest.';
   }
   return row.preview_type === 'image/gif'
     ? 'a GIF is attached. It animates on Slack and Telegram, but Discord shows '
       + 'its first frame and LinkedIn skips it for being under card size — '
       + 'Video is the compatible choice.'
-    : 'a video clip is attached — it plays in the card on Discord and Twitter, '
+    : 'a video clip is attached — it plays in the card on Discord, '
       + 'and the still stands in everywhere else.';
 }
 
@@ -169,15 +174,18 @@ async function showShare() {
     copied = true;
   } catch { /* no clipboard permission — the input below still works */ }
 
+  // X is its own sentence everywhere below: it iframes the live player for any
+  // particle, so what's stored here changes nothing about that card.
   const moving = !api.previewsConfigured()
     ? 'Right now it previews with the site card rather than this particle — '
       + 'per-particle previews need the preview endpoint deployed (see the setup guide).'
     : row.preview_url
-      ? 'It embeds the looping clip, so the card plays.'
-      : 'The card shows the thumbnail. '
+      ? 'On X it runs the effect live; elsewhere it embeds the looping clip, '
+        + 'so the card plays there too.'
+      : 'On X it runs the effect live. Elsewhere the card shows the thumbnail — '
         + (api.currentUser()?.id === row.owner
-          ? 'Render a clip below to make it move.'
-          : 'Only the author can add a moving preview.');
+          ? 'render a clip below to make those move as well.'
+          : 'only the author can add a moving preview.');
 
   const div = el(`<div>
     <p>${copied ? 'Link copied to clipboard.' : 'Copy this link:'}</p>
@@ -185,12 +193,54 @@ async function showShare() {
       style="width:100%;font-family:var(--mono);font-size:12px;margin:8px 0">
     <p class="muted">Pastes into Discord, Slack, Twitter and the rest as a preview
       card, and opens this page for anyone who clicks it. ${esc(moving)}</p>
+
+    <div class="share-embed">
+      <div class="share-embed-head">
+        <b>Embed on your own page</b>
+        <button class="btn small" id="btn-embed-copy">Copy</button>
+      </div>
+      <textarea class="text-in embed-code" readonly rows="4"
+        style="width:100%;font-family:var(--mono);font-size:11.5px;resize:vertical"></textarea>
+      <p class="muted small">The player with none of the site around it. Runs the effect
+        live where WebGPU is available, and falls back to this particle's clip or still
+        where it isn't.</p>
+    </div>
+
     <p class="muted small">Plain page link: <a href="${esc(api.pageLink(row.id))}">${esc(api.pageLink(row.id))}</a></p>
   </div>`);
+
+  // Set as .value rather than in the markup above: the snippet is already
+  // HTML, and putting it through the template would escape it a second time.
+  const code = div.querySelector('.embed-code');
+  code.value = embedSnippet();
+  code.addEventListener('focus', () => code.select());
+  div.querySelector('#btn-embed-copy').addEventListener('click', async (e) => {
+    // Held onto before the await: currentTarget is only valid while the event
+    // is being dispatched, and is null by the time the clipboard resolves.
+    const btn = e.currentTarget;
+    try {
+      await navigator.clipboard.writeText(code.value);
+      btn.textContent = 'Copied ✓';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1600);
+    } catch {
+      code.focus();                    // no clipboard permission — select it instead
+      toast('Press ⌘/Ctrl+C to copy');
+    }
+  });
+
   modal('Share', div);
   const inp = div.querySelector('.share-url');
   inp.addEventListener('focus', () => inp.select());
   inp.focus();
+}
+
+/** The iframe to paste into someone else's page. 640x360 is 16:9 at a size
+ *  that fits an article column; the embed itself is fluid, so changing the
+ *  numbers is all anyone has to do. */
+function embedSnippet() {
+  return `<iframe src="${esc(api.embedLink(row.id))}" width="640" height="360"`
+    + ` style="border:0" loading="lazy" allowfullscreen`
+    + ` title="${esc(row.title)} on particletoy"></iframe>`;
 }
 
 /** Re-renders the preview clip from this page, so particles published before

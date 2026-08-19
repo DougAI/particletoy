@@ -117,7 +117,8 @@ tonemapping.
   owners can flip particles **public/private**, edit, or delete
 - **Embeds** ([embed.html](embed.html)) — the same live player with no site chrome
   around it, for `<iframe>`s and for X's player card; falls back to the particle's
-  clip or still where WebGPU isn't available
+  clip or still where WebGPU isn't available. **Share** on any particle page hands
+  out the iframe snippet
 - **Browse** ([browse.html](browse.html)) — full-text search, tag filters,
   newest/popular/loved sorting, pagination
 - **Publish from the editor** — captures a thumbnail and a short preview clip and saves
@@ -129,9 +130,10 @@ tonemapping.
   real page. Dependency-free, build-step-free plain JS that detects its runtime, so the
   one file runs on Cloudflare Workers or Deno Deploy — *not* on a default
   `*.supabase.co` function URL, which rewrites HTML responses to `text/plain`.
-  On X, which iframes `twitter:player`, the card runs the effect *live* — it points at
-  [embed.html](embed.html) rather than the page, so the timeline gets the viewport and
-  not the whole website
+  On X, which iframes `twitter:player`, the card runs the effect *live* — for **every**
+  particle, since the embed renders in the reader's own browser and there's nothing to
+  pre-render. It points at [embed.html](embed.html) rather than the page, so the
+  timeline gets the viewport and not the whole website
 - Admin curation (★ feature / ☀ particle of the day) straight from particle pages
 
 Setup for all of it is one SQL file + a few dashboard toggles — see

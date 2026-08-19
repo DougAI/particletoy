@@ -580,6 +580,36 @@ a:hover { text-decoration: underline; }
 .modal-body { padding: 16px 18px 18px; }
 .modal-tabs { display: flex; gap: 4px; margin-bottom: 16px; }
 
+/* The Share dialog's two read-only fields. .text-in is the editor's class,
+   and css/style.css — which the site pages don't load — is where it was
+   styled, so until now the share URL rendered as a bare white browser input
+   in the middle of a dark dialog. */
+.text-in {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+.text-in:focus { outline: none; border-color: var(--accent-2); }
+
+.share-embed {
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+  padding-top: 14px;
+}
+.share-embed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+.share-embed p { margin-top: 6px; }
+.share-embed + p { margin-top: 12px; }
+
 /* ---------------------------------------------------------------- misc */
 #toast {
   position: fixed;

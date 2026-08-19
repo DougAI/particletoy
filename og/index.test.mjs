@@ -73,6 +73,8 @@ function ok(name, cond, extra = '') {
     '<meta property="og:video:width" content="960">',
     '<meta name="twitter:card" content="player">',
     `<meta name="twitter:player" content="${SITE}/embed.html?id=${ID}">`,
+    '<meta name="twitter:player:width" content="1280">',
+    '<meta name="twitter:player:height" content="720">',
     '<meta name="twitter:player:stream:content_type" content="video/mp4">',
     '<meta property="og:image" content="https://cdn.example/thumb.jpg">',
     '<meta name="theme-color" content="#e8a33d">',
@@ -105,17 +107,48 @@ function ok(name, cond, extra = '') {
   const html = await (await call(`https://proj.supabase.co/og/${ID}`, DISCORD)).text();
   ok('gif goes in og:image', html.includes('<meta property="og:image" content="https://cdn.example/clip.gif">'));
   ok('gif emits no og:video', !html.includes('og:video'));
-  ok('gif uses summary_large_image', html.includes('<meta name="twitter:card" content="summary_large_image">'));
+  ok('gif still gets the live player', html.includes('<meta name="twitter:card" content="player">')
+     && html.includes(`<meta name="twitter:player" content="${SITE}/embed.html?id=${ID}">`), '\n' + html);
+  ok('gif hands over no stream', !html.includes('twitter:player:stream'), '\n' + html);
   ok('gif card is sized', html.includes('<meta property="og:image:width" content="960">')
      && html.includes('<meta property="og:image:height" content="540">'), '\n' + html);
+
+  // preview_type without a preview_url — a half-written row, or a clip deleted
+  // out from under it. A player card with no image is the one shape X won't
+  // render, so the still has to win here.
+  nextRows = [{ ...ROW, preview_type: 'image/gif', preview_url: null }];
+  const stale = await (await call(`https://proj.supabase.co/og/${ID}`, DISCORD)).text();
+  ok('a gif type with no gif still has an image',
+     stale.includes('<meta name="twitter:image" content="https://cdn.example/thumb.jpg">')
+     && stale.includes('<meta property="og:image" content="https://cdn.example/thumb.jpg">'),
+     '\n' + stale);
 }
 
-// ── 3. No preview clip → still image card ──────────────────────────────────
+// ── 3. No preview clip → the player anyway, with the still as its poster ───
+// There is nothing to pre-render: the embed runs the effect in the reader's
+// own browser, so a particle with no stored clip plays on X exactly like one
+// that has one. Everywhere that can't run a player still gets the thumbnail.
 {
   nextRows = [{ ...ROW, preview_url: null, preview_type: null }];
   const html = await (await call(`https://proj.supabase.co/og/${ID}`, DISCORD)).text();
   ok('falls back to thumb', html.includes('<meta property="og:image" content="https://cdn.example/thumb.jpg">'));
   ok('no video tags', !html.includes('og:video'));
+  ok('clipless particle still gets the player',
+     html.includes('<meta name="twitter:card" content="player">')
+     && html.includes(`<meta name="twitter:player" content="${SITE}/embed.html?id=${ID}">`), '\n' + html);
+  ok('player card carries its fallback image',
+     html.includes('<meta name="twitter:image" content="https://cdn.example/thumb.jpg">'), '\n' + html);
+  ok('nothing to stream', !html.includes('twitter:player:stream'), '\n' + html);
+  ok('no summary_large_image left over',
+     !html.includes('summary_large_image'), '\n' + html);
+
+  // No thumbnail either: the site card stands in, so the player still has the
+  // image X requires of it.
+  nextRows = [{ ...ROW, preview_url: null, preview_type: null, thumb_url: null }];
+  const bare = await (await call(`https://proj.supabase.co/og/${ID}`, DISCORD)).text();
+  ok('thumbless particle falls back to the site card image',
+     bare.includes(`<meta name="twitter:image" content="${SITE}/img/og-card.jpg">`), '\n' + bare);
+  ok('…and still gets the player', bare.includes('<meta name="twitter:card" content="player">'));
 }
 
 // ── 4. Humans are redirected ───────────────────────────────────────────────
@@ -175,6 +208,7 @@ function ok(name, cond, extra = '') {
   globalThis.fetch = async () => ({ ok: true, json: async () => [ROW] });
   const j2 = await (await call(`https://proj.supabase.co/og/${ID}?debug=1`, CHROME)).json();
   ok('debug names the video clip', j2.cardWouldShow.includes('playing clip'), j2.cardWouldShow);
+  ok('debug names the live player', j2.livePlayerOnX === `${SITE}/embed.html?id=${ID}`, j2.livePlayerOnX);
 
   globalThis.fetch = async () => ({ ok: false, status: 401, text: async () => 'no key' });
   const j3 = await (await call(`https://proj.supabase.co/og/${ID}?debug=1`, CHROME)).json();
@@ -202,6 +236,9 @@ function ok(name, cond, extra = '') {
   ok('still shows the thumbnail',
      html.includes('<meta property="og:image" content="https://cdn.example/thumb.jpg">'));
   ok('no video tags without the columns', !html.includes('og:video'));
+  ok('the player survives a database that predates the clips',
+     html.includes('<meta name="twitter:card" content="player">')
+     && html.includes(`<meta name="twitter:player" content="${SITE}/embed.html?id=${ID}">`), '\n' + html);
 
   const j = await (await call(`https://proj.supabase.co/og/${ID}?debug=1`, CHROME)).json();
   ok('debug flags the missing columns', j.previewColumns === 'missing', JSON.stringify(j));

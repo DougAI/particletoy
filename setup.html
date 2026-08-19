@@ -291,7 +291,10 @@ python serve.py            # then open http://localhost:8917</code></pre>
   MP4 given to them as <code>og:video</code>; anything that won't shows the thumbnail
   instead, so the card is never empty. Particles published before this existed can get
   a clip from the <b>Link preview → Render clip</b> button on their own page, without a
-  trip to the editor.</p>
+  trip to the editor. The clip matters everywhere <em>except</em> X, which runs the
+  effect live for every particle either way (see below) — worth rendering for Discord
+  and for the still that LinkedIn and Bluesky show, but no longer the difference
+  between a card and a dead one.</p>
 
   <p><b>Video or GIF.</b> The <b>Link preview</b> box has a format picker, and
   <b>Video is the compatible choice</b>. It stores an MP4 for <code>og:video</code>,
@@ -307,7 +310,7 @@ python serve.py            # then open http://localhost:8917</code></pre>
     <tr><th>Platform</th><th>Video preview</th><th>GIF preview</th></tr>
     <tr><td>Discord</td><td>plays the clip</td><td>first frame</td></tr>
     <tr><td>Slack / Telegram</td><td>still image</td><td>animates</td></tr>
-    <tr><td>Twitter / X</td><td>plays the clip</td><td>first frame</td></tr>
+    <tr><td>Twitter / X</td><td>runs the effect live</td><td>runs the effect live</td></tr>
     <tr><td>Bluesky</td><td>still image</td><td>first frame</td></tr>
     <tr><td>LinkedIn</td><td>still image</td><td>no card — under size</td></tr>
   </table>
@@ -315,8 +318,13 @@ python serve.py            # then open http://localhost:8917</code></pre>
   <code>twitter:player</code> points at, which is <code>embed.html?id=…</code> — the
   player with no site chrome around it. (Point that at <code>view.html</code> and the
   card shows the entire website, header and search box and all, squeezed into a 16:9
-  box.) Everywhere else the clip is as close as it gets: embeds are limited to each
-  platform's own list of providers. LinkedIn also caches hard — use its
+  box.) <b>Every particle gets it</b>, clip or no clip: there is nothing to
+  pre-render, because the embed runs the effect in the reader's own browser. A stored
+  clip is still handed over as <code>twitter:player:stream</code>, and the thumbnail is
+  still the <code>twitter:image</code> X shows while the iframe loads — so a particle
+  that has neither previews no worse than it did before. Everywhere else the clip is as
+  close as it gets: embeds are limited to each platform's own list of providers.
+  LinkedIn also caches hard — use its
   <a href="https://www.linkedin.com/post-inspector/" target="_blank">Post Inspector</a>
   to force a re-fetch rather than assuming a fix didn't work.</p>
 
@@ -327,7 +335,8 @@ python serve.py            # then open http://localhost:8917</code></pre>
   Discord won't run the live player either — it only iframes a handful of whitelisted
   providers, so there a playing clip is as close as it gets.</p>
 
-  <p class="muted">To put a particle in your own page, iframe the same URL X does:
+  <p class="muted">To put a particle in your own page, iframe the same URL X does —
+  <b>Share → Embed on your own page</b> has the snippet ready to copy:
   <code>&lt;iframe src="https://&lt;you&gt;.github.io/particletoy/embed.html?id=&lt;particle-id&gt;"
   width="640" height="360" allowfullscreen&gt;&lt;/iframe&gt;</code>. It plays live where
   WebGPU is available and falls back to the particle's clip or still where it isn't.</p>
