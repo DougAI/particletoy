@@ -583,9 +583,15 @@ export function pageLink(particleId) {
   return new URL(`view.html?id=${particleId}`, location.href).href;
 }
 
-/** The player with no site chrome around it — what the Share dialog's embed
- *  snippet points an <iframe> at, and what og/index.js hands X as
- *  twitter:player. Same origin as the page, so a fork gets its own. */
-export function embedLink(particleId) {
-  return new URL(`embed.html?id=${particleId}`, location.href).href;
+/** The player with no site chrome around it. Same origin as the page, so a
+ *  fork gets its own.
+ *
+ *  The plain link is the decorative one — no anchors, no pointer events —
+ *  because that is what og/index.js hands X as twitter:player, where a frame
+ *  that can navigate or swallow a scroll is a frame misbehaving on someone
+ *  else's timeline. An embed in your own article is the opposite case: you
+ *  put it there to be touched, so the Share snippet opts in. */
+export function embedLink(particleId, { interactive = false } = {}) {
+  const q = interactive ? `?id=${particleId}&interactive=1` : `?id=${particleId}`;
+  return new URL(`embed.html${q}`, location.href).href;
 }
