@@ -249,7 +249,20 @@ function meta(tags) {
     .join('\n');
 }
 
-function page({ title, canonical, tags }) {
+/** The URL this card is for: the one that was actually requested, with the
+ *  diagnostic switches taken back off. og:url and the canonical link have to
+ *  be exactly this — see the note in particleCard. */
+function shareUrl(url) {
+  const u = new URL(url);
+  u.searchParams.delete('card');
+  u.searchParams.delete('debug');
+  u.hash = '';
+  return u.toString();
+}
+
+/** @param canonical  what this page calls itself — og:url's twin.
+ *  @param link       where a reader is actually going, if it differs. */
+function page({ title, canonical, link = canonical, tags }) {
   // No meta-refresh and no redirect script, deliberately. A browser never
   // reaches this page — it gets a 302 further down — so a crawler is the only
   // thing that ever reads this HTML, and telling a crawler the page has moved
@@ -270,7 +283,7 @@ ${tags}
 </style>
 </head>
 <body>
-<p><a href="${esc(canonical)}">${esc(title)}</a></p>
+<p><a href="${esc(link)}">${esc(title)}</a></p>
 </body>
 </html>
 `;
@@ -303,12 +316,13 @@ function siteCard(cfg) {
   });
 }
 
-function particleCard(cfg, p) {
-  const canonical = `${cfg.site}/view.html?id=${p.id}`;
-  // What Twitter loads inside the player card's iframe. Not the canonical
-  // page: an iframe of view.html renders the whole website — header, search
-  // box, sign-in button, comments below the fold — inside a 16:9 box on
-  // someone's timeline. embed.html is the viewport on its own.
+/** @param self  the URL that was requested — the one somebody pasted. */
+function particleCard(cfg, p, self) {
+  const pageUrl = `${cfg.site}/view.html?id=${p.id}`;
+  // What Twitter loads inside the player card's iframe. Not the page itself:
+  // an iframe of view.html renders the whole website — header, search box,
+  // sign-in button, comments below the fold — inside a 16:9 box on someone's
+  // timeline. embed.html is the viewport on its own.
   const embed = `${cfg.site}/embed.html?id=${p.id}`;
   const author = (p.author && (p.author.display_name || p.author.username)) || 'anonymous';
   const title = `${p.title} — by ${author}`;
@@ -327,19 +341,40 @@ function particleCard(cfg, p) {
   // An animated GIF preview goes in as the image itself; otherwise the still
   // thumbnail is the poster frame. Either way this is the card's image, and
   // the player's poster while the iframe loads — so it must never come out
-  // empty, which is why the GIF branch checks the URL is actually there
-  // rather than trusting preview_type on its own.
-  const image = (isGif && p.preview_url) ? p.preview_url : poster;
+  // empty, which is why this checks the URL is actually there rather than
+  // trusting preview_type on its own.
+  const gif = (isGif && p.preview_url) ? p.preview_url : null;
+  const image = gif || poster;
+
+  /** One image and the properties describing it. Open Graph attaches
+   *  og:image:* to the og:image immediately above them, so a card can offer
+   *  several and each keeps its own size and type. */
+  const imageTags = (url, w, h, type) => [
+    ['og:image', url],
+    ['og:image:secure_url', url],
+    ['og:image:type', type],
+    ['og:image:width', w],
+    ['og:image:height', h],
+    ['og:image:alt', `${p.title}, a particle effect by ${author}`],
+  ];
 
   const tags = [
     ['og:site_name', 'particletoy'],
-    ['og:url', canonical],
+    // Not view.html — this endpoint's own URL. See the note below.
+    ['og:url', self],
     ['og:title', title],
     ['og:description', description],
     ['description', description],
     ['theme-color', BRAND_COLOR],
-    ['og:image', image],
-    ['og:image:alt', `${p.title}, a particle effect by ${author}`],
+
+    // The GIF first where there is one, since Slack and Telegram animate it,
+    // and the still — always card-sized — behind it. A scraper that turns the
+    // first image down moves on to the next, and LinkedIn turns down anything
+    // under 1200x627: a preview GIF is 640x360, so with nothing behind it a
+    // GIF particle offers LinkedIn no usable image, and no image is no card.
+    ...(gif ? imageTags(gif, vw, vh, p.preview_type) : []),
+    ...imageTags(poster, CARD_W, CARD_H, 'image/jpeg'),
+
     ['article:author', author],
 
     // Every particle gets the player, clip or no clip. X iframes
@@ -375,8 +410,6 @@ function particleCard(cfg, p) {
       ['og:video:type', p.preview_type],
       ['og:video:width', vw],
       ['og:video:height', vh],
-      ['og:image:width', CARD_W],
-      ['og:image:height', CARD_H],
       // Handed over as well as the iframe: X plays the stream directly on
       // clients that won't run a player, and it costs nothing where it does.
       ['twitter:player:stream', p.preview_url],
@@ -384,15 +417,26 @@ function particleCard(cfg, p) {
     );
   } else {
     tags.push(['og:type', 'website']);
-    // Sizing the GIF stops the card being laid out for the 640×360 thumbnail
-    // it isn't. (Whether it animates is up to the reader: Discord shows frame
-    // one, Slack and Telegram play it.)
-    if (isGif) tags.push(['og:image:width', vw], ['og:image:height', vh]);
   }
 
   tags.push(['twitter:title', title], ['twitter:description', description]);
 
-  return page({ title, canonical, tags: meta(tags) });
+  // og:url and the canonical link are this endpoint's own URL rather than
+  // view.html's, which reads backwards until you look at what og:url is for.
+  // It is not "where to send the reader" to every crawler: LinkedIn treats it
+  // as the identity of the thing being shared — it reads og:url, fetches
+  // *that*, and builds the card out of whatever it finds there. Pointed at
+  // view.html, what it found was a static file carrying the generic site tags,
+  // whose own og:url drops the ?id — so every particle on LinkedIn resolved to
+  // one URL with one generic card, which is the shape "no preview" takes
+  // there. Self-referential, the hop has nowhere to go and the particle's own
+  // tags are the ones that count.
+  //
+  // Nothing else notices: Discord, Slack, Telegram and X key off the URL that
+  // was pasted and label the card from og:site_name. And a reader still ends
+  // up on view.html — the 302 below takes them there, and so does the link in
+  // the body of this page.
+  return page({ title, canonical: self, link: pageUrl, tags: meta(tags) });
 }
 
 /** The whole endpoint. Exported so the test can drive it without a server. */
@@ -478,7 +522,7 @@ export async function handle(req, passedEnv) {
   }
 
   if (!found.row) return new Response(siteCard(cfg), { status: 200, headers });
-  return new Response(particleCard(cfg, found.row), { status: 200, headers });
+  return new Response(particleCard(cfg, found.row, shareUrl(url)), { status: 200, headers });
 }
 
 // Cloudflare Workers (and anything else module-worker shaped) uses this.

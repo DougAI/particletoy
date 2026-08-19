@@ -48,6 +48,9 @@ const call = (url, ua) =>
   handle(new Request(url, { headers: ua ? { 'user-agent': ua } : {} }), ENV);
 
 const SITE = 'https://dougai.github.io/particletoy';
+// Where the endpoint itself answers — what a reader pastes, and so what the
+// card has to call itself.
+const OG = 'https://proj.supabase.co/og';
 const ID = ROW.id;
 const DISCORD = 'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)';
 const CHROME = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140.0 Safari/537.36';
@@ -66,7 +69,7 @@ function ok(name, cond, extra = '') {
   ok('queries by id', String(lastFetchUrl).includes(`id=eq.${ID}`), lastFetchUrl);
   for (const tag of [
     '<meta property="og:site_name" content="particletoy">',
-    `<meta property="og:url" content="${SITE}/view.html?id=${ID}">`,
+    `<meta property="og:url" content="${OG}/${ID}">`,
     '<meta property="og:type" content="video.other">',
     '<meta property="og:video" content="https://cdn.example/clip.mp4">',
     '<meta property="og:video:type" content="video/mp4">',
@@ -97,8 +100,14 @@ function ok(name, cond, extra = '') {
   // button inside the card. The canonical link still goes to view.html.
   ok('player iframes the chrome-free embed, not the page',
      !html.includes(`<meta name="twitter:player" content="${SITE}/view.html`), '\n' + html);
-  ok('canonical is still the real page',
-     html.includes(`<link rel="canonical" href="${SITE}/view.html?id=${ID}">`), '\n' + html);
+  // og:url and canonical name this endpoint, not view.html: LinkedIn refetches
+  // og:url and builds the card from what it finds there, and view.html is a
+  // static file with generic tags. The reader still gets the real page — from
+  // the 302, and from the link in the body.
+  ok('canonical is the endpoint itself',
+     html.includes(`<link rel="canonical" href="${OG}/${ID}">`), '\n' + html);
+  ok('the body still links a human to the page',
+     html.includes(`<a href="${SITE}/view.html?id=${ID}">`), '\n' + html);
 }
 
 // ── 2. A GIF preview becomes the image, not a video ────────────────────────
@@ -295,6 +304,64 @@ function ok(name, cond, extra = '') {
   ok('og:image is declared at card size',
      html.includes('<meta property="og:image:width" content="1200">')
      && html.includes('<meta property="og:image:height" content="630">'), '\n' + html);
+}
+
+// ── 13. LinkedIn ───────────────────────────────────────────────────────────
+// The one crawler that follows og:url and rebuilds the card from whatever is
+// there, and the one that refuses to build a card at all around an image under
+// 1200x627. Both of those used to end in no preview.
+{
+  const LINKEDIN = 'LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)';
+  globalThis.fetch = async () => ({ ok: true, json: async () => nextRows });
+
+  nextRows = [ROW];
+  const res = await call(`${OG}/${ID}?utm_source=li`, LINKEDIN);
+  const html = await res.text();
+  ok('LinkedIn gets the card, not a redirect', res.status === 200, String(res.status));
+  // Refetching this lands on the same tags rather than on view.html's generic
+  // ones — query string and all, because that is the URL that was shared.
+  ok('og:url is the URL that was requested',
+     html.includes(`<meta property="og:url" content="${OG}/${ID}?utm_source=li">`), '\n' + html);
+  ok('og:url never points off to view.html',
+     !html.includes(`<meta property="og:url" content="${SITE}/view.html`), '\n' + html);
+  ok('the image is declared at card size, with a type',
+     html.includes('<meta property="og:image:width" content="1200">')
+     && html.includes('<meta property="og:image:height" content="630">')
+     && html.includes('<meta property="og:image:type" content="image/jpeg">'), '\n' + html);
+  ok('and offered over https as well',
+     html.includes('<meta property="og:image:secure_url" content="https://cdn.example/thumb.jpg">'),
+     '\n' + html);
+
+  // ?card=1 and ?debug=1 are switches for whoever is inspecting the endpoint,
+  // not part of the shared URL.
+  const inspected = await (await call(`${OG}/${ID}?card=1`, CHROME)).text();
+  ok('the diagnostic switch stays out of og:url',
+     inspected.includes(`<meta property="og:url" content="${OG}/${ID}">`), '\n' + inspected);
+
+  // A GIF particle: the GIF is 640x360, under LinkedIn's floor, so the
+  // card-sized still has to be there behind it or LinkedIn has no image to
+  // take and draws nothing.
+  nextRows = [{
+    ...ROW, preview_type: 'image/gif', preview_url: 'https://cdn.example/clip.gif',
+    preview_w: 640, preview_h: 360,
+  }];
+  const g = await (await call(`${OG}/${ID}`, LINKEDIN)).text();
+  const images = [...g.matchAll(/<meta property="og:image" content="([^"]+)">/g)].map((m) => m[1]);
+  ok('the gif is offered first, the card-sized still second',
+     images[0] === 'https://cdn.example/clip.gif' && images[1] === 'https://cdn.example/thumb.jpg',
+     JSON.stringify(images));
+  ok('each image carries its own size',
+     g.includes('<meta property="og:image:width" content="640">')
+     && g.includes('<meta property="og:image:width" content="1200">'), '\n' + g);
+
+  // A particle nobody has published a still for falls back to the site card,
+  // which is card-sized by construction — so there is always one image
+  // LinkedIn will take.
+  nextRows = [{ ...ROW, thumb_url: null, preview_url: null, preview_type: null }];
+  const bare = await (await call(`${OG}/${ID}`, LINKEDIN)).text();
+  ok('a particle with no still still offers a card-sized image',
+     bare.includes(`<meta property="og:image" content="${SITE}/img/og-card.jpg">`)
+     && bare.includes('<meta property="og:image:width" content="1200">'), '\n' + bare);
 }
 
 console.log(process.exitCode ? '\nFAILED' : '\nall good');

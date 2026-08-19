@@ -123,9 +123,9 @@ tonemapping.
   newest/popular/loved sorting, pagination
 - **Publish from the editor** — captures a thumbnail and a short preview clip and saves
   to your account; re-publishing your own particle updates it in place
-- **Link previews** — paste a particle link into Discord, Slack or Twitter and the card
-  shows the title, author, stats and the effect *playing*. Crawlers don't run JavaScript
-  and a static host can't vary `<head>` per particle, so one small function
+- **Link previews** — paste a particle link into Discord, Slack, LinkedIn or Twitter
+  and the card shows the title, author, stats and the effect *playing*. Crawlers don't
+  run JavaScript and a static host can't vary `<head>` per particle, so one function
   ([og/index.js](og/index.js)) renders the Open Graph tags and redirects humans to the
   real page. Dependency-free, build-step-free plain JS that detects its runtime, so the
   one file runs on Cloudflare Workers or Deno Deploy — *not* on a default
