@@ -57,6 +57,11 @@ const SITE_URL = 'https://dougai.github.io/particletoy';
 const BRAND_COLOR = '#e8a33d';          // Discord paints the embed's edge with it
 const CARD_W = 1200;
 const CARD_H = 630;
+// The twitter:player box. The embed itself is fluid, so this is only an aspect
+// ratio as far as X is concerned — 16:9, the shape the player frame has been
+// on the site since there was one.
+const PLAYER_W = 1280;
+const PLAYER_H = 720;
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
@@ -319,6 +324,12 @@ function particleCard(cfg, p) {
   const isGif = p.preview_type === 'image/gif';
   const vw = p.preview_w || 960;
   const vh = p.preview_h || 540;
+  // An animated GIF preview goes in as the image itself; otherwise the still
+  // thumbnail is the poster frame. Either way this is the card's image, and
+  // the player's poster while the iframe loads — so it must never come out
+  // empty, which is why the GIF branch checks the URL is actually there
+  // rather than trusting preview_type on its own.
+  const image = (isGif && p.preview_url) ? p.preview_url : poster;
 
   const tags = [
     ['og:site_name', 'particletoy'],
@@ -327,17 +338,35 @@ function particleCard(cfg, p) {
     ['og:description', description],
     ['description', description],
     ['theme-color', BRAND_COLOR],
-    // An animated GIF preview goes in as the image itself; otherwise the
-    // still thumbnail is the poster frame.
-    ['og:image', isGif ? p.preview_url : poster],
+    ['og:image', image],
     ['og:image:alt', `${p.title}, a particle effect by ${author}`],
     ['article:author', author],
+
+    // Every particle gets the player, clip or no clip. X iframes
+    // twitter:player, and embed.html runs the effect live in whoever's
+    // browser is looking at the timeline — there is nothing to pre-render and
+    // no reason to hold it back for the particles that happen to have an MP4
+    // stored. The ones that don't used to fall back to a still image here;
+    // now they play too.
+    //
+    // twitter:image is not optional on a player card. It is what X shows
+    // before the iframe loads and what it falls back to if the player can't
+    // run, and `image` above guarantees one — the particle's thumbnail, or
+    // the site card if it somehow has none.
+    ['twitter:card', 'player'],
+    ['twitter:player', embed],
+    // The embed is fluid; these describe the 16:9 box to lay the card out in,
+    // not any stored file. (og:video:width/height below do describe the clip.)
+    ['twitter:player:width', PLAYER_W],
+    ['twitter:player:height', PLAYER_H],
+    ['twitter:image', image],
   ];
 
   if (isVideo && p.preview_url) {
     // The recipe every "fix broken embeds" service converges on: og:type
     // video.other plus a *direct* file URL. Discord will not touch an iframe
-    // from a domain it doesn't know, but it will play a bare MP4.
+    // from a domain it doesn't know — the live player is X's alone — but it
+    // will play a bare MP4.
     tags.push(
       ['og:type', 'video.other'],
       ['og:video', p.preview_url],
@@ -348,20 +377,13 @@ function particleCard(cfg, p) {
       ['og:video:height', vh],
       ['og:image:width', CARD_W],
       ['og:image:height', CARD_H],
-      // Discord wants the Twitter card set too before it will show a player.
-      ['twitter:card', 'player'],
-      ['twitter:player', embed],
-      ['twitter:player:width', vw],
-      ['twitter:player:height', vh],
+      // Handed over as well as the iframe: X plays the stream directly on
+      // clients that won't run a player, and it costs nothing where it does.
       ['twitter:player:stream', p.preview_url],
       ['twitter:player:stream:content_type', p.preview_type],
     );
   } else {
-    tags.push(
-      ['og:type', 'website'],
-      ['twitter:card', 'summary_large_image'],
-      ['twitter:image', isGif ? p.preview_url : poster],
-    );
+    tags.push(['og:type', 'website']);
     // Sizing the GIF stops the card being laid out for the 640×360 thumbnail
     // it isn't. (Whether it animates is up to the reader: Discord shows frame
     // one, Slack and Telegram play it.)
@@ -421,11 +443,15 @@ export async function handle(req, passedEnv) {
       particleFound: Boolean(row),
       restStatus: found.status,
       note: found.note,
+      // What everything *except* X shows. X iframes twitter:player and runs
+      // the effect live for any particle that resolves, which is why it is
+      // reported separately rather than folded in here.
       cardWouldShow: !row ? 'the generic particletoy card'
         : (row.preview_type || '').startsWith('video/') ? `a playing clip (${row.preview_type})`
         : row.preview_type === 'image/gif' ? 'a GIF (first frame only in Discord)'
         : row.thumb_url ? 'the still thumbnail — no preview clip rendered yet'
         : 'the generic card image — this particle has no thumbnail either',
+      livePlayerOnX: row ? `${cfg.site}/embed.html?id=${row.id}` : null,
       title: row ? row.title : null,
       previewColumns: found.previewColumns,
       anonKeySet: Boolean(cfg.anonKey),

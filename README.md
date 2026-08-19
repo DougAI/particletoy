@@ -130,9 +130,10 @@ tonemapping.
   real page. Dependency-free, build-step-free plain JS that detects its runtime, so the
   one file runs on Cloudflare Workers or Deno Deploy — *not* on a default
   `*.supabase.co` function URL, which rewrites HTML responses to `text/plain`.
-  On X, which iframes `twitter:player`, the card runs the effect *live* — it points at
-  [embed.html](embed.html) rather than the page, so the timeline gets the viewport and
-  not the whole website
+  On X, which iframes `twitter:player`, the card runs the effect *live* — for **every**
+  particle, since the embed renders in the reader's own browser and there's nothing to
+  pre-render. It points at [embed.html](embed.html) rather than the page, so the
+  timeline gets the viewport and not the whole website
 - Admin curation (★ feature / ☀ particle of the day) straight from particle pages
 
 Setup for all of it is one SQL file + a few dashboard toggles — see
