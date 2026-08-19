@@ -300,6 +300,11 @@ function siteCard(cfg) {
 
 function particleCard(cfg, p) {
   const canonical = `${cfg.site}/view.html?id=${p.id}`;
+  // What Twitter loads inside the player card's iframe. Not the canonical
+  // page: an iframe of view.html renders the whole website — header, search
+  // box, sign-in button, comments below the fold — inside a 16:9 box on
+  // someone's timeline. embed.html is the viewport on its own.
+  const embed = `${cfg.site}/embed.html?id=${p.id}`;
   const author = (p.author && (p.author.display_name || p.author.username)) || 'anonymous';
   const title = `${p.title} — by ${author}`;
 
@@ -345,7 +350,7 @@ function particleCard(cfg, p) {
       ['og:image:height', CARD_H],
       // Discord wants the Twitter card set too before it will show a player.
       ['twitter:card', 'player'],
-      ['twitter:player', canonical],
+      ['twitter:player', embed],
       ['twitter:player:width', vw],
       ['twitter:player:height', vh],
       ['twitter:player:stream', p.preview_url],

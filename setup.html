@@ -97,6 +97,7 @@ python serve.py            # then open http://localhost:8917</code></pre>
     <tr><td><code>index.html</code></td><td>front page — particle of the day, featured, latest</td></tr>
     <tr><td><code>browse.html</code></td><td>search / sort / tag browsing</td></tr>
     <tr><td><code>view.html?id=…</code></td><td>a particle's page — player, likes, comments</td></tr>
+    <tr><td><code>embed.html?id=…</code></td><td>the player alone, no site chrome — for iframes and X's player card</td></tr>
     <tr><td><code>editor.html</code></td><td>the editor (old share links to index.html redirect here)</td></tr>
     <tr><td><code>account.html</code></td><td>your particles, profile, settings</td></tr>
     <tr><td><code>user.html?u=…</code></td><td>anyone's public profile</td></tr>
@@ -310,9 +311,12 @@ python serve.py            # then open http://localhost:8917</code></pre>
     <tr><td>Bluesky</td><td>still image</td><td>first frame</td></tr>
     <tr><td>LinkedIn</td><td>still image</td><td>no card — under size</td></tr>
   </table>
-  <p class="muted">Nowhere renders the live effect: interactive embeds are limited to
-  each platform's own list of providers, so a playing clip is as close as it gets.
-  LinkedIn also caches hard — use its
+  <p class="muted">X is the one that renders the effect itself: it iframes whatever
+  <code>twitter:player</code> points at, which is <code>embed.html?id=…</code> — the
+  player with no site chrome around it. (Point that at <code>view.html</code> and the
+  card shows the entire website, header and search box and all, squeezed into a 16:9
+  box.) Everywhere else the clip is as close as it gets: embeds are limited to each
+  platform's own list of providers. LinkedIn also caches hard — use its
   <a href="https://www.linkedin.com/post-inspector/" target="_blank">Post Inspector</a>
   to force a re-fetch rather than assuming a fix didn't work.</p>
 
@@ -320,8 +324,13 @@ python serve.py            # then open http://localhost:8917</code></pre>
   the address a crawler has to fetch for any of this to happen — clicking it lands on
   the normal page. Editor <b>Share</b> links (<code>#s=…</code>) can never preview: the
   effect rides in the URL fragment, which browsers never send to a server.
-  Interactive embeds aren't possible either — Discord only runs players for a handful of
-  whitelisted providers, so a playing clip is as close as it gets.</p>
+  Discord won't run the live player either — it only iframes a handful of whitelisted
+  providers, so there a playing clip is as close as it gets.</p>
+
+  <p class="muted">To put a particle in your own page, iframe the same URL X does:
+  <code>&lt;iframe src="https://&lt;you&gt;.github.io/particletoy/embed.html?id=&lt;particle-id&gt;"
+  width="640" height="360" allowfullscreen&gt;&lt;/iframe&gt;</code>. It plays live where
+  WebGPU is available and falls back to the particle's clip or still where it isn't.</p>
 
   <p class="muted">Moving it later is one constant: point <code>SHARE_BASE</code> in
   <code>js/backend.js</code> at whatever answers <code>&lt;base&gt;/&lt;particle-id&gt;</code>

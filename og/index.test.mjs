@@ -72,6 +72,7 @@ function ok(name, cond, extra = '') {
     '<meta property="og:video:type" content="video/mp4">',
     '<meta property="og:video:width" content="960">',
     '<meta name="twitter:card" content="player">',
+    `<meta name="twitter:player" content="${SITE}/embed.html?id=${ID}">`,
     '<meta name="twitter:player:stream:content_type" content="video/mp4">',
     '<meta property="og:image" content="https://cdn.example/thumb.jpg">',
     '<meta name="theme-color" content="#e8a33d">',
@@ -89,6 +90,13 @@ function ok(name, cond, extra = '') {
   ok('no redirect script for crawlers', !html.includes('location.replace'), '\n' + html);
   ok('no raw newline inside an attribute',
      !/content="[^"]*\n/.test(html) && html.includes('&#10;'), '\n' + html);
+  // The whole point of embed.html: Twitter iframes twitter:player, and
+  // pointing it at view.html put the site header, search box and sign-in
+  // button inside the card. The canonical link still goes to view.html.
+  ok('player iframes the chrome-free embed, not the page',
+     !html.includes(`<meta name="twitter:player" content="${SITE}/view.html`), '\n' + html);
+  ok('canonical is still the real page',
+     html.includes(`<link rel="canonical" href="${SITE}/view.html?id=${ID}">`), '\n' + html);
 }
 
 // ── 2. A GIF preview becomes the image, not a video ────────────────────────
