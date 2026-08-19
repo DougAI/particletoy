@@ -115,6 +115,9 @@ tonemapping.
 - **Project pages** ([view.html](view.html)) — live player, description, tags, author,
   created/edited dates, view counter, **likes** and a **comment section**;
   owners can flip particles **public/private**, edit, or delete
+- **Embeds** ([embed.html](embed.html)) — the same live player with no site chrome
+  around it, for `<iframe>`s and for X's player card; falls back to the particle's
+  clip or still where WebGPU isn't available
 - **Browse** ([browse.html](browse.html)) — full-text search, tag filters,
   newest/popular/loved sorting, pagination
 - **Publish from the editor** — captures a thumbnail and a short preview clip and saves
@@ -125,7 +128,10 @@ tonemapping.
   ([og/index.js](og/index.js)) renders the Open Graph tags and redirects humans to the
   real page. Dependency-free, build-step-free plain JS that detects its runtime, so the
   one file runs on Cloudflare Workers or Deno Deploy — *not* on a default
-  `*.supabase.co` function URL, which rewrites HTML responses to `text/plain`
+  `*.supabase.co` function URL, which rewrites HTML responses to `text/plain`.
+  On X, which iframes `twitter:player`, the card runs the effect *live* — it points at
+  [embed.html](embed.html) rather than the page, so the timeline gets the viewport and
+  not the whole website
 - Admin curation (★ feature / ☀ particle of the day) straight from particle pages
 
 Setup for all of it is one SQL file + a few dashboard toggles — see
@@ -150,8 +156,8 @@ can't touch counters or admin flags.
 
 ## Code map
 
-Site: `index.html` / `browse.html` / `view.html` / `account.html` / `user.html` +
-`js/pages/*` and shared chrome in `js/site.js`; `js/backend.js` is the whole REST client
+Site: `index.html` / `browse.html` / `view.html` / `embed.html` / `account.html` /
+`user.html` + `js/pages/*` and shared chrome in `js/site.js`; `js/backend.js` is the whole REST client
 (auth, particles, likes, comments, notifications, storage); `js/player.js` is the
 embeddable renderer used for the front page, hover previews, and view pages.
 Editor: `editor.html` + `js/main.js`, with `js/renderer.js` (both pipelines),

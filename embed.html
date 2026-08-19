@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>particletoy — embed</title>
+<meta name="description" content="A realtime WebGPU particle effect, playing on its own.">
+<!-- The chrome-free player: canvas edge to edge, no site header, no title
+     block, no comments. This is what Twitter's player card loads in its
+     iframe (see twitter:player in og/index.js), and what anyone embedding a
+     particle in their own page should point an <iframe> at. Pointing the card
+     at view.html instead put the whole website — search box, nav, sign-in
+     button and all — inside a 16:9 box on someone's timeline.
+
+     No preview card of its own on purpose: this page is never the thing you
+     share. view.html is the shareable page, and og/index.js renders its card. -->
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✨</text></svg>">
+<style>
+  /* Self-contained rather than css/site.css: this page shares none of the
+     site's chrome, and an embed that lives inside other people's pages
+     shouldn't move every time the gallery restyles. */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: #000;
+    color: #d7dae0;
+    font: 13px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif;
+    overflow: hidden;                     /* an embed never scrolls */
+  }
+  #stage { position: absolute; inset: 0; }
+  #stage canvas, #stage img, #stage video {
+    width: 100%; height: 100%; display: block; object-fit: contain;
+  }
+
+  /* Controls float over the canvas so the effect keeps the whole frame — the
+     point of the exercise. They show themselves once on load (body.reveal) so
+     nobody has to guess they're there, then hide until hover; on a touch
+     screen, where there is no hover, they stay up (body.touch). */
+  #bar {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.55) 55%);
+    color: #c9cdd6;
+    font-size: 12px;
+    opacity: 0;
+    transition: opacity 0.18s;
+    pointer-events: none;                 /* the canvas keeps the drags */
+  }
+  #bar > * { pointer-events: auto; }
+  body:hover #bar, body.touch #bar, body.reveal #bar, #bar:focus-within { opacity: 1; }
+  .btn {
+    background: rgba(20, 22, 27, 0.75);
+    border: 1px solid #333844;
+    color: #d7dae0;
+    border-radius: 8px;
+    padding: 4px 9px;
+    font: inherit;
+    line-height: 1.4;
+    cursor: pointer;
+  }
+  .btn:hover { border-color: #4a5162; }
+  .spacer { flex: 1; }
+  .hint { color: #8b909c; }
+  @media (max-width: 460px) { .hint { display: none; } }
+
+  /* Top-right corner: who made it and where it lives. The only piece of site
+     identity that survives into the embed. */
+  #credit {
+    position: absolute;
+    top: 10px; right: 12px;
+    max-width: 60%;
+    color: #c9cdd6;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+    text-align: right;
+    text-decoration: none;
+    opacity: 0;
+    transition: opacity 0.18s;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  body:hover #credit, body.touch #credit, body.reveal #credit { opacity: 1; }
+  #credit:hover { text-decoration: underline; }
+  #credit b { color: #fff; font-weight: 600; }
+  #credit .brand { color: #e8a33d; }
+
+  #msg {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    text-align: center;
+    padding: 24px;
+    color: #8b909c;
+  }
+  #msg a { color: #4d9fff; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<a id="credit" target="_blank" rel="noopener"></a>
+<div id="bar" hidden>
+  <button class="btn" id="pl-toggle" title="Play/Pause" aria-label="Play/Pause">⏸</button>
+  <button class="btn" id="pl-restart" title="Restart" aria-label="Restart">⟲</button>
+  <span id="pl-stats"></span>
+  <span class="spacer"></span>
+  <span class="hint">drag to orbit · wheel to zoom</span>
+</div>
+<script type="module" src="js/pages/embed.js"></script>
+</body>
+</html>
