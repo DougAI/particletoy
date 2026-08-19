@@ -309,6 +309,14 @@ function particleCard(cfg, p) {
   // page: an iframe of view.html renders the whole website — header, search
   // box, sign-in button, comments below the fold — inside a 16:9 box on
   // someone's timeline. embed.html is the viewport on its own.
+  //
+  // The plain ?id= URL on purpose. That is embed.html's decorative mode: no
+  // anchors in the document, so the frame cannot navigate anywhere, and no
+  // pointer events, so a drag or a scroll over the card reaches the timeline
+  // rather than the orbit camera. Its interactive mode is an opt-in
+  // (&interactive=1) that belongs to embeds someone placed in their own page.
+  // One parameter also means no & to entity-encode into the meta tag, and so
+  // nothing for a crawler that parses tags with a regex to mangle.
   const embed = `${cfg.site}/embed.html?id=${p.id}`;
   const author = (p.author && (p.author.display_name || p.author.username)) || 'anonymous';
   const title = `${p.title} — by ${author}`;
@@ -357,6 +365,9 @@ function particleCard(cfg, p) {
     ['twitter:player', embed],
     // The embed is fluid; these describe the 16:9 box to lay the card out in,
     // not any stored file. (og:video:width/height below do describe the clip.)
+    // The canvas fills its iframe and takes its drawing buffer from that box,
+    // so it renders at whatever ratio these two give it — mismatch them and X
+    // letterboxes the effect inside its own card.
     ['twitter:player:width', PLAYER_W],
     ['twitter:player:height', PLAYER_H],
     ['twitter:image', image],
