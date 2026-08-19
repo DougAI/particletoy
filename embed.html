@@ -12,6 +12,20 @@
      at view.html instead put the whole website — search box, nav, sign-in
      button and all — inside a 16:9 box on someone's timeline.
 
+     Two modes, and the plain URL is the careful one:
+
+       embed.html?id=…                 decorative. No anchors anywhere in the
+                                       document, so the frame cannot navigate
+                                       — by construction, not by good manners
+                                       — and no pointer events, so a drag or a
+                                       scroll over the card belongs to the
+                                       page around it rather than the orbit
+                                       camera. This is the card.
+       embed.html?id=…&interactive=1   orbit, zoom, controls, and a credit
+                                       linking back to the particle's page.
+                                       What Share hands out for an iframe in
+                                       someone's own article.
+
      No preview card of its own on purpose: this page is never the thing you
      share. view.html is the shareable page, and og/index.js renders its card. -->
 <meta name="robots" content="noindex">
@@ -33,6 +47,14 @@
   #stage canvas, #stage img, #stage video {
     width: 100%; height: 100%; display: block; object-fit: contain;
   }
+
+  /* Decorative by default: the gesture over this frame belongs to whatever
+     page is hosting it. The orbit camera captures the pointer and eats the
+     wheel, which on a timeline means a card that swallows your scroll.
+     (EffectPlayer does the same to its own canvas when it isn't interactive;
+     this covers the fallback <video>/<img> as well.) */
+  #stage { pointer-events: none; }
+  body.interactive #stage { pointer-events: auto; }
 
   /* Controls float over the canvas so the effect keeps the whole frame — the
      point of the exercise. They show themselves once on load (body.reveal) so
@@ -69,8 +91,9 @@
   .hint { color: #8b909c; }
   @media (max-width: 460px) { .hint { display: none; } }
 
-  /* Top-right corner: who made it and where it lives. The only piece of site
-     identity that survives into the embed. */
+  /* Top-right corner: who made it and where it lives. Interactive mode only —
+     it is the one link in the document, and the card is the mode that must
+     not have one. */
   #credit {
     position: absolute;
     top: 10px; right: 12px;
@@ -78,7 +101,6 @@
     color: #c9cdd6;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
     text-align: right;
-    text-decoration: none;
     opacity: 0;
     transition: opacity 0.18s;
     overflow: hidden;
@@ -86,7 +108,8 @@
     text-overflow: ellipsis;
   }
   body:hover #credit, body.touch #credit, body.reveal #credit { opacity: 1; }
-  #credit:hover { text-decoration: underline; }
+  #credit a { color: inherit; text-decoration: none; }
+  #credit a:hover { text-decoration: underline; }
   #credit b { color: #fff; font-weight: 600; }
   #credit .brand { color: #e8a33d; }
 
@@ -107,7 +130,7 @@
 </head>
 <body>
 <div id="stage"></div>
-<a id="credit" target="_blank" rel="noopener"></a>
+<div id="credit"></div>
 <div id="bar" hidden>
   <button class="btn" id="pl-toggle" title="Play/Pause" aria-label="Play/Pause">⏸</button>
   <button class="btn" id="pl-restart" title="Restart" aria-label="Restart">⟲</button>

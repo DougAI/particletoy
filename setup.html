@@ -97,7 +97,7 @@ python serve.py            # then open http://localhost:8917</code></pre>
     <tr><td><code>index.html</code></td><td>front page — particle of the day, featured, latest</td></tr>
     <tr><td><code>browse.html</code></td><td>search / sort / tag browsing</td></tr>
     <tr><td><code>view.html?id=…</code></td><td>a particle's page — player, likes, comments</td></tr>
-    <tr><td><code>embed.html?id=…</code></td><td>the player alone, no site chrome — for iframes and X's player card</td></tr>
+    <tr><td><code>embed.html?id=…</code></td><td>the player alone, no site chrome — X's player card; decorative, add <code>&amp;interactive=1</code> to orbit it</td></tr>
     <tr><td><code>editor.html</code></td><td>the editor (old share links to index.html redirect here)</td></tr>
     <tr><td><code>account.html</code></td><td>your particles, profile, settings</td></tr>
     <tr><td><code>user.html?u=…</code></td><td>anyone's public profile</td></tr>
@@ -318,7 +318,10 @@ python serve.py            # then open http://localhost:8917</code></pre>
   <code>twitter:player</code> points at, which is <code>embed.html?id=…</code> — the
   player with no site chrome around it. (Point that at <code>view.html</code> and the
   card shows the entire website, header and search box and all, squeezed into a 16:9
-  box.) <b>Every particle gets it</b>, clip or no clip: there is nothing to
+  box.) The plain <code>?id=</code> URL is the page's <b>decorative</b> mode, and the
+  card wants exactly that: no anchors anywhere in the document, so the frame has
+  nowhere to navigate to, and no pointer events, so a drag or a scroll over the card
+  goes to the timeline instead of the orbit camera. <b>Every particle gets it</b>, clip or no clip: there is nothing to
   pre-render, because the embed runs the effect in the reader's own browser. A stored
   clip is still handed over as <code>twitter:player:stream</code>, and the thumbnail is
   still the <code>twitter:image</code> X shows while the iframe loads — so a particle
@@ -341,11 +344,15 @@ python serve.py            # then open http://localhost:8917</code></pre>
   Discord won't run the live player either — it only iframes a handful of whitelisted
   providers, so there a playing clip is as close as it gets.</p>
 
-  <p class="muted">To put a particle in your own page, iframe the same URL X does —
+  <p class="muted">To put a particle in your own page, iframe the same page —
   <b>Share → Embed on your own page</b> has the snippet ready to copy:
-  <code>&lt;iframe src="https://&lt;you&gt;.github.io/particletoy/embed.html?id=&lt;particle-id&gt;"
-  width="640" height="360" allowfullscreen&gt;&lt;/iframe&gt;</code>. It plays live where
-  WebGPU is available and falls back to the particle's clip or still where it isn't.</p>
+  <code>&lt;iframe src="https://&lt;you&gt;.github.io/particletoy/embed.html?id=&lt;particle-id&gt;<b>&amp;interactive=1</b>"
+  width="640" height="360" allowfullscreen&gt;&lt;/iframe&gt;</code>. The
+  <code>interactive</code> flag is the difference from the card: it turns on orbit,
+  zoom, the controls and a credit linking back — an embed you placed yourself is one
+  you want people to touch, so it may keep the wheel. It plays live where WebGPU is
+  available and falls back to the particle's clip or still where it isn't. Keep the
+  iframe at the same ratio as the canvas (16:9) or you get letterboxing.</p>
 
   <p class="muted">Moving it later is one constant: point <code>SHARE_BASE</code> in
   <code>js/backend.js</code> at whatever answers <code>&lt;base&gt;/&lt;particle-id&gt;</code>

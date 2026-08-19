@@ -236,9 +236,10 @@ async function showShare() {
 
 /** The iframe to paste into someone else's page. 640x360 is 16:9 at a size
  *  that fits an article column; the embed itself is fluid, so changing the
- *  numbers is all anyone has to do. */
+ *  numbers is all anyone has to do. Interactive, unlike the card X gets: an
+ *  embed you placed yourself is one you want people to orbit. */
 function embedSnippet() {
-  return `<iframe src="${esc(api.embedLink(row.id))}" width="640" height="360"`
+  return `<iframe src="${esc(api.embedLink(row.id, { interactive: true }))}" width="640" height="360"`
     + ` style="border:0" loading="lazy" allowfullscreen`
     + ` title="${esc(row.title)} on particletoy"></iframe>`;
 }
