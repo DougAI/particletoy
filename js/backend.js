@@ -582,3 +582,10 @@ export function shareLink(particleId) {
 export function pageLink(particleId) {
   return new URL(`view.html?id=${particleId}`, location.href).href;
 }
+
+/** The player with no site chrome around it — what the Share dialog's embed
+ *  snippet points an <iframe> at, and what og/index.js hands X as
+ *  twitter:player. Same origin as the page, so a fork gets its own. */
+export function embedLink(particleId) {
+  return new URL(`embed.html?id=${particleId}`, location.href).href;
+}

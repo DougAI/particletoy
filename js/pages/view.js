@@ -185,12 +185,54 @@ async function showShare() {
       style="width:100%;font-family:var(--mono);font-size:12px;margin:8px 0">
     <p class="muted">Pastes into Discord, Slack, Twitter and the rest as a preview
       card, and opens this page for anyone who clicks it. ${esc(moving)}</p>
+
+    <div class="share-embed">
+      <div class="share-embed-head">
+        <b>Embed on your own page</b>
+        <button class="btn small" id="btn-embed-copy">Copy</button>
+      </div>
+      <textarea class="text-in embed-code" readonly rows="4"
+        style="width:100%;font-family:var(--mono);font-size:11.5px;resize:vertical"></textarea>
+      <p class="muted small">The player with none of the site around it. Runs the effect
+        live where WebGPU is available, and falls back to this particle's clip or still
+        where it isn't.</p>
+    </div>
+
     <p class="muted small">Plain page link: <a href="${esc(api.pageLink(row.id))}">${esc(api.pageLink(row.id))}</a></p>
   </div>`);
+
+  // Set as .value rather than in the markup above: the snippet is already
+  // HTML, and putting it through the template would escape it a second time.
+  const code = div.querySelector('.embed-code');
+  code.value = embedSnippet();
+  code.addEventListener('focus', () => code.select());
+  div.querySelector('#btn-embed-copy').addEventListener('click', async (e) => {
+    // Held onto before the await: currentTarget is only valid while the event
+    // is being dispatched, and is null by the time the clipboard resolves.
+    const btn = e.currentTarget;
+    try {
+      await navigator.clipboard.writeText(code.value);
+      btn.textContent = 'Copied ✓';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1600);
+    } catch {
+      code.focus();                    // no clipboard permission — select it instead
+      toast('Press ⌘/Ctrl+C to copy');
+    }
+  });
+
   modal('Share', div);
   const inp = div.querySelector('.share-url');
   inp.addEventListener('focus', () => inp.select());
   inp.focus();
+}
+
+/** The iframe to paste into someone else's page. 640x360 is 16:9 at a size
+ *  that fits an article column; the embed itself is fluid, so changing the
+ *  numbers is all anyone has to do. */
+function embedSnippet() {
+  return `<iframe src="${esc(api.embedLink(row.id))}" width="640" height="360"`
+    + ` style="border:0" loading="lazy" allowfullscreen`
+    + ` title="${esc(row.title)} on particletoy"></iframe>`;
 }
 
 /** Re-renders the preview clip from this page, so particles published before
