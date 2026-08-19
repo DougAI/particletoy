@@ -38,8 +38,8 @@ function previewStateText() {
   }
   return row.preview_type === 'image/gif'
     ? 'a GIF is attached. It animates on Slack and Telegram, but Discord shows '
-      + 'its first frame and LinkedIn skips it for being under card size — '
-      + 'Video is the compatible choice.'
+      + 'its first frame and LinkedIn falls back to the still, which is under '
+      + 'the GIF in the card — Video is the compatible choice.'
     : 'a video clip is attached — it plays in the card on Discord, '
       + 'and the still stands in everywhere else.';
 }

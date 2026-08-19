@@ -6,10 +6,18 @@
 <title>particletoy — view</title>
 <meta name="description" content="A realtime WebGPU particle effect on particletoy. Open it to watch it play, orbit the camera, or fork it in the editor.">
 <!-- Link preview card — see the note in index.html. Absolute by necessity:
-     crawlers don't run JavaScript and don't reliably resolve relative URLs. -->
+     crawlers don't run JavaScript and don't reliably resolve relative URLs.
+
+     Deliberately no og:url. This file is a different particle for every ?id
+     and a static <head> cannot say which, so the only honest value is none:
+     naming the bare view.html told LinkedIn — which reads og:url as the
+     identity of the thing being shared — that every particle on the site is
+     the same object, and it showed one generic card for all of them. Left
+     out, the URL somebody actually shared stands, and each particle previews
+     as itself. Its own card comes from og/index.js, which is what the Share
+     dialog hands out. -->
 <meta property="og:site_name" content="particletoy">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://dougai.github.io/particletoy/view.html">
 <meta property="og:title" content="particletoy — a particle effect">
 <meta property="og:description" content="A realtime WebGPU particle effect on particletoy. Open it to watch it play, orbit the camera, or fork it in the editor.">
 <meta property="og:image" content="https://dougai.github.io/particletoy/img/og-card.jpg">

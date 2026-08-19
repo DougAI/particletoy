@@ -301,9 +301,9 @@ python serve.py            # then open http://localhost:8917</code></pre>
   which Discord and Twitter play inline, and leaves the 1200×630 still as the
   <code>og:image</code> that every other platform uses. GIF instead becomes the
   <code>og:image</code> itself: it animates on Slack and Telegram, shows as a first
-  frame on Discord, and is skipped by LinkedIn for being under its minimum card size.
-  Switching format re-renders the clip, replaces the stored one, and refreshes the
-  still.</p>
+  frame on Discord, and is too small for LinkedIn, which passes over it and takes the
+  still offered behind it. Switching format re-renders the clip, replaces the stored
+  one, and refreshes the still.</p>
 
   <h3>What each platform actually does</h3>
   <table>
@@ -312,7 +312,7 @@ python serve.py            # then open http://localhost:8917</code></pre>
     <tr><td>Slack / Telegram</td><td>still image</td><td>animates</td></tr>
     <tr><td>Twitter / X</td><td>runs the effect live</td><td>runs the effect live</td></tr>
     <tr><td>Bluesky</td><td>still image</td><td>first frame</td></tr>
-    <tr><td>LinkedIn</td><td>still image</td><td>no card — under size</td></tr>
+    <tr><td>LinkedIn</td><td>still image</td><td>still image</td></tr>
   </table>
   <p class="muted">X is the one that renders the effect itself: it iframes whatever
   <code>twitter:player</code> points at, which is <code>embed.html?id=…</code> — the
@@ -333,7 +333,13 @@ python serve.py            # then open http://localhost:8917</code></pre>
 
   <p class="muted">The <b>Share</b> button hands out the function's URL, because that is
   the address a crawler has to fetch for any of this to happen — clicking it lands on
-  the normal page. Editor <b>Share</b> links (<code>#s=…</code>) can never preview: the
+  the normal page. The card names that same URL in <code>og:url</code>, which looks
+  wrong until you meet LinkedIn: it treats <code>og:url</code> as the identity of what
+  is being shared and rebuilds the card from whatever is at it, so pointing it at
+  <code>view.html</code> sent LinkedIn to a static file with generic tags and no
+  <code>?id</code> — every particle filed under one URL, one generic card, which reads
+  as no preview at all. Keep <code>og:url</code> self-referential in any fork.
+  Editor <b>Share</b> links (<code>#s=…</code>) can never preview: the
   effect rides in the URL fragment, which browsers never send to a server.
   Discord won't run the live player either — it only iframes a handful of whitelisted
   providers, so there a playing clip is as close as it gets.</p>
