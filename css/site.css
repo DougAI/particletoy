@@ -230,7 +230,7 @@ a:hover { text-decoration: underline; }
 .field { margin-bottom: 14px; }
 .field label { display: block; font-size: 12.5px; color: var(--text-dim); margin-bottom: 5px; }
 .field input[type="text"], .field input[type="email"], .field input[type="password"],
-.field textarea, .field select {
+.field input[type="number"], .field textarea, .field select {
   width: 100%;
   padding: 8px 11px;
   background: var(--panel-2);
@@ -244,6 +244,10 @@ a:hover { text-decoration: underline; }
 .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--accent-2); }
 .field textarea { resize: vertical; min-height: 80px; }
 .field .hint { font-size: 11.5px; color: var(--text-dim); margin-top: 4px; }
+/* Two-up form rows, for dialogs whose fields are short numbers and pickers
+   rather than the full-width text the stacked .field default is built for. */
+.clip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+@media (max-width: 460px) { .clip-grid { grid-template-columns: 1fr; } }
 .form-error { color: var(--danger); font-size: 13px; margin: 8px 0; min-height: 17px; }
 .form-ok { color: var(--ok); font-size: 13px; margin: 8px 0; }
 .check-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 13.5px; }

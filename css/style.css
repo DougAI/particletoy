@@ -188,6 +188,10 @@ input[type="checkbox"] { accent-color: var(--accent-2); width: 15px; height: 15p
 .section > summary::before { content: "▸ "; color: var(--text-dim); }
 .section[open] > summary::before { content: "▾ "; }
 .section-body { padding: 8px 12px 12px; }
+/* The same disclosure inside a dialog, where there is no inspector column to
+   sit flush against: it needs its own edges rather than the panel's. */
+.dialog-section { border: 1px solid var(--border); border-radius: 7px; margin: 10px 0; }
+.dialog-section > summary { border-radius: 6px 6px 0 0; }
 
 .prop-row {
   display: flex;

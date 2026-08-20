@@ -17,6 +17,7 @@ import * as api from './backend.js';
 import { captureCanvasJPEG } from './player.js';
 import {
   exportVideo, exportGif, getVideoMimeType, capturePreviewClip, MAX_EXPORT_SECONDS,
+  prerollFor, CLIP_LIMITS, PREVIEW_DEFAULT_SECONDS,
 } from './exportmedia.js';
 
 const canvas = document.getElementById('gl');
@@ -468,6 +469,12 @@ async function showPublish() {
   if (!api.currentUser() && !(await editorSignIn())) return;
 
   const owner = isCloudOwner();
+  // What the automatic capture would skip, shown as the field's starting value
+  // rather than hidden behind an "auto" — the number is the useful part, and
+  // it is different for a burst than for a campfire. Read straight off the
+  // live emitters' params: prerollFor only looks at enabled/looping/bursts,
+  // which they carry, so this costs nothing and needs no serialize.
+  const clipStart = prerollFor({ emitters: app.emitters.map((em) => em.p) });
   const div = document.createElement('div');
   div.innerHTML = `
     <div class="prop-row"><label class="prop-label">Title</label>
@@ -484,6 +491,31 @@ async function showPublish() {
       </select></div>
     ${owner ? `<label class="prop-row" style="gap:6px;cursor:pointer">
       <input type="checkbox" id="pub-copy"> <span>Publish as a new copy instead of updating</span></label>` : ''}
+    <details class="section dialog-section">
+      <summary>Link preview clip</summary>
+      <div class="section-body">
+        <div class="prop-row"><label class="prop-label">Format</label>
+          <select id="pub-clip-format" class="select-in">
+            <option value="auto">Video</option>
+            <option value="gif">GIF</option>
+          </select></div>
+        <div class="prop-row"><label class="prop-label">Speed</label>
+          <select id="pub-clip-speed" class="select-in">
+            ${CLIP_LIMITS.speeds.map((v) =>
+              `<option value="${v}" ${v === 1 ? 'selected' : ''}>${v}×</option>`).join('')}
+          </select></div>
+        <div class="prop-row"><label class="prop-label">Start at (s)</label>
+          <input id="pub-clip-start" class="num-in" type="number" value="${clipStart}"
+            min="${CLIP_LIMITS.start.min}" max="${CLIP_LIMITS.start.max}"
+            step="${CLIP_LIMITS.start.step}"></div>
+        <div class="prop-row"><label class="prop-label">Length (s)</label>
+          <input id="pub-clip-seconds" class="num-in" type="number"
+            value="${PREVIEW_DEFAULT_SECONDS.video}"
+            min="${CLIP_LIMITS.seconds.min}" max="${CLIP_LIMITS.seconds.max}"
+            step="${CLIP_LIMITS.seconds.step}"></div>
+        <p class="muted" id="pub-clip-summary"></p>
+      </div>
+    </details>
     <p id="pub-err" class="muted" style="color:var(--danger);min-height:16px"></p>
     <button id="pub-go" class="btn btn-accent">${owner ? 'Save changes' : 'Publish'}</button>
     <span class="muted"> A thumbnail and a short preview clip are captured from the current view.</span>
@@ -495,6 +527,57 @@ async function showPublish() {
   div.querySelector('#pub-desc').value = cloud.description || '';
   div.querySelector('#pub-tags').value = (cloud.tags || []).join(', ');
   div.querySelector('#pub-vis').value = cloud.visibility || 'public';
+
+  /** The clip fields, clamped. Speed is the one that needs saying out loud:
+   *  it changes how much of the effect fits in the clip, not how long the
+   *  clip runs — so 2x is the cheap way to show more without paying for a
+   *  longer file. */
+  // One description of the two number fields, shared by the read and the clamp,
+  // so what the summary says and what the field shows can't drift.
+  const clipNums = [
+    ['start', '#pub-clip-start', CLIP_LIMITS.start, 0],
+    ['seconds', '#pub-clip-seconds', CLIP_LIMITS.seconds, PREVIEW_DEFAULT_SECONDS.video],
+  ];
+  const clipValue = ([, id, { min, max }, fallback]) => {
+    const v = parseFloat(div.querySelector(id).value);
+    return Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
+  };
+  const readClip = () => ({
+    format: div.querySelector('#pub-clip-format').value,
+    speed: parseFloat(div.querySelector('#pub-clip-speed').value) || 1,
+    ...Object.fromEntries(clipNums.map((f) => [f[0], clipValue(f)])),
+  });
+  const clipSummary = div.querySelector('#pub-clip-summary');
+  const syncClip = () => {
+    const c = readClip();
+    clipSummary.textContent =
+      `A ${c.seconds}s clip covering ${(c.seconds * c.speed).toFixed(1)}s of the effect`
+      + `${c.start > 0 ? `, from ${c.start}s in` : ', from the start'}.`
+      + (c.format === 'gif' ? ' GIFs cost far more per second than video.' : '');
+  };
+  div.querySelectorAll('.dialog-section select, .dialog-section input')
+    .forEach((n) => n.addEventListener('input', syncClip));
+  // Clamped on commit rather than on every keystroke, so typing "12" doesn't
+  // fight the cursor at "1" — but once focus leaves, the field shows the
+  // number that will actually be recorded rather than the one that was typed.
+  clipNums.forEach((f) => div.querySelector(f[1]).addEventListener('change', (e) => {
+    e.target.value = clipValue(f);
+    syncClip();
+  }));
+  // The two formats want different lengths — a GIF second costs several times
+  // what a video second does. Swap the prefill when the field is still showing
+  // the other format's default; a number the owner typed is theirs and stays.
+  const lenIn = div.querySelector('#pub-clip-seconds');
+  div.querySelector('#pub-clip-format').addEventListener('change', (e) => {
+    const [mine, theirs] = e.target.value === 'gif'
+      ? [PREVIEW_DEFAULT_SECONDS.gif, PREVIEW_DEFAULT_SECONDS.video]
+      : [PREVIEW_DEFAULT_SECONDS.video, PREVIEW_DEFAULT_SECONDS.gif];
+    if (parseFloat(lenIn.value) === theirs) {
+      lenIn.value = mine;
+      syncClip();
+    }
+  });
+  syncClip();
 
   div.querySelector('#pub-go').addEventListener('click', async () => {
     const err = div.querySelector('#pub-err');
@@ -533,6 +616,7 @@ async function showPublish() {
           camera,
           pipeline: app.pipeline,
           allowCompile: true,       // the editor already holds the compiler
+          ...readClip(),
           onProgress: (p) => {
             status.textContent = `Rendering link preview… ${Math.round(Math.min(1, p) * 100)}%`;
           },
@@ -594,6 +678,12 @@ function showExportMedia() {
       <input id="xm-seconds" class="num-in" type="number" min="1" max="${MAX_EXPORT_SECONDS}" step="0.5" value="4"></div>
     <div class="prop-row"><label class="prop-label">Frame rate</label>
       <select id="xm-fps" class="select-in"></select></div>
+    <div class="prop-row"><label class="prop-label">Speed</label>
+      <select id="xm-speed" class="select-in">
+        ${CLIP_LIMITS.speeds.map((v) =>
+          `<option value="${v}" ${v === 1 ? 'selected' : ''}>${v}×${
+            v < 1 ? ' — slow motion' : v > 1 ? ' — fast forward' : ''}</option>`).join('')}
+      </select></div>
     <p class="muted">Uses the current camera angle and the ${app.pipeline === 'deferred' ? 'PBR · Deferred' : 'PBR · Forward'} pipeline. Renders in the background — the viewport keeps playing.</p>
     <div id="xm-progress-wrap" class="xm-progress-wrap hidden">
       <div class="xm-progress-bar"><div id="xm-progress-fill" class="xm-progress-fill"></div></div>
@@ -652,6 +742,8 @@ function showExportMedia() {
     const [w, h] = div.querySelector('#xm-size').value.split('x').map(Number);
     const seconds = Math.max(1, Math.min(MAX_EXPORT_SECONDS, parseFloat(div.querySelector('#xm-seconds').value) || 4));
     const fps = parseInt(fpsSel.value, 10);
+    // Duration is how long the file plays; speed is how much effect is in it.
+    const speed = parseFloat(div.querySelector('#xm-speed').value) || 1;
 
     go.disabled = true;
     go.classList.add('hidden');
@@ -678,7 +770,7 @@ function showExportMedia() {
       // to recompiling all of them from source.
       const result = await (format === 'video' ? exportVideo : exportGif)({
         data: currentData({ withCache: true }),
-        camera, w, h, fps, seconds, pipeline: app.pipeline, onProgress, signal,
+        camera, w, h, fps, seconds, speed, pipeline: app.pipeline, onProgress, signal,
       });
       if (!result) {
         toast('Export cancelled');
