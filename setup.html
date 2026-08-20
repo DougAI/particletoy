@@ -97,7 +97,7 @@ python serve.py            # then open http://localhost:8917</code></pre>
     <tr><td><code>index.html</code></td><td>front page — particle of the day, featured, latest</td></tr>
     <tr><td><code>browse.html</code></td><td>search / sort / tag browsing</td></tr>
     <tr><td><code>view.html?id=…</code></td><td>a particle's page — player, likes, comments</td></tr>
-    <tr><td><code>embed.html?id=…</code></td><td>the player alone, no site chrome — X's player card; decorative, add <code>&amp;interactive=1</code> to orbit it</td></tr>
+    <tr><td><code>embed.html?id=…</code></td><td>the player alone, no site chrome — X's player card; play/pause, restart and a link back, add <code>&amp;interactive=1</code> to orbit it</td></tr>
     <tr><td><code>editor.html</code></td><td>the editor (old share links to index.html redirect here)</td></tr>
     <tr><td><code>account.html</code></td><td>your particles, profile, settings</td></tr>
     <tr><td><code>user.html?u=…</code></td><td>anyone's public profile</td></tr>
@@ -348,11 +348,13 @@ python serve.py            # then open http://localhost:8917</code></pre>
   <b>Share → Embed on your own page</b> has the snippet ready to copy:
   <code>&lt;iframe src="https://&lt;you&gt;.github.io/particletoy/embed.html?id=&lt;particle-id&gt;<b>&amp;interactive=1</b>"
   width="640" height="360" allowfullscreen&gt;&lt;/iframe&gt;</code>. The
-  <code>interactive</code> flag is the difference from the card: it turns on orbit,
-  zoom, the controls and a credit linking back — an embed you placed yourself is one
-  you want people to touch, so it may keep the wheel. It plays live where WebGPU is
-  available and falls back to the particle's clip or still where it isn't. Keep the
-  iframe at the same ratio as the canvas (16:9) or you get letterboxing.</p>
+  <code>interactive</code> flag is the difference from the card: it turns on orbit and
+  zoom — an embed you placed yourself is one you want people to touch, so it may keep
+  the wheel. Play/pause, restart and the corner credit are on both: a button eats no
+  scroll, and the credit's link opens a new tab, so neither one steers the page the
+  card is sitting in. It plays live where WebGPU is available and falls back to the
+  particle's clip or still where it isn't. Keep the iframe at the same ratio as the
+  canvas (16:9) or you get letterboxing.</p>
 
   <p class="muted">Moving it later is one constant: point <code>SHARE_BASE</code> in
   <code>js/backend.js</code> at whatever answers <code>&lt;base&gt;/&lt;particle-id&gt;</code>
