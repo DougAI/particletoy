@@ -125,6 +125,10 @@ tonemapping.
   newest/popular/loved sorting, pagination
 - **Publish from the editor** — captures a thumbnail and a short preview clip and saves
   to your account; re-publishing your own particle updates it in place
+- **Clip controls** — the preview clip's format, start time, speed and length are the
+  owner's to set, in the publish dialog and again on the particle's own page. Speed is
+  the interesting one: at 2× a clip covers twice as much effect without costing a byte
+  more, and below 1× it records in slow motion
 - **Link previews** — paste a particle link into Discord, Slack, LinkedIn or Twitter
   and the card shows the title, author, stats and the effect *playing*. Crawlers don't
   run JavaScript and a static host can't vary `<head>` per particle, so one function
@@ -174,5 +178,6 @@ editor panel). `js/exportmedia.js` renders clips on a detached canvas — both t
 Export Media downloads and the link-preview clips. `og/index.js` is the only
 server-side code in the project. Three dependency-free test files, run with plain
 `node` and no install: `og/index.test.mjs` (the Open Graph tag contract),
-`js/exportmedia.test.mjs` (how much of an effect a preview clip skips) and
-`js/wgslcache.test.mjs` (what a saved effect must carry for the gallery to render it).
+`js/exportmedia.test.mjs` (how much of an effect a preview clip skips, and how far
+the simulation moves between two recorded frames) and `js/wgslcache.test.mjs` (what a
+saved effect must carry for the gallery to render it).

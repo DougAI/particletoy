@@ -7,7 +7,9 @@ import {
   avatarHTML, ensureSignedIn, modal, closeModal,
 } from '../site.js';
 import { EffectPlayer } from '../player.js';
-import { capturePreviewClip } from '../exportmedia.js';
+import {
+  capturePreviewClip, prerollFor, CLIP_LIMITS, PREVIEW_DEFAULT_SECONDS,
+} from '../exportmedia.js';
 
 const $ = (id) => document.getElementById(id);
 const page = document.getElementById('page');
@@ -100,12 +102,8 @@ function render() {
       <b>Link preview</b>
       <span class="muted" id="prev-state">${previewStateText()}</span>
       <span style="flex:1"></span>
-      <select id="prev-format" class="btn small" title="What the shared link embeds">
-        <option value="auto" ${row.preview_type === 'image/gif' ? '' : 'selected'}>Video</option>
-        <option value="gif" ${row.preview_type === 'image/gif' ? 'selected' : ''}>GIF</option>
-      </select>
       <button class="btn small" id="btn-preview">
-        ${row.preview_url ? 'Re-render clip' : 'Render clip'}</button>
+        ${row.preview_url ? 'Re-render clip…' : 'Render clip…'}</button>
     </div>` : ''}
 
     ${row.description ? `<div class="view-desc">${esc(row.description)}</div>` : ''}
@@ -256,35 +254,146 @@ function embedSnippet() {
     + ` title="${esc(row.title)} on particletoy"></iframe>`;
 }
 
-/** Re-renders the preview clip from this page, so particles published before
- *  previews existed (or edited since) can get one without a trip to the
- *  editor. Owner only — the storage path is keyed to the uploader. */
-async function renderPreview(btn, state) {
+/** The owner's clip settings, for as long as this page is open.
+ *
+ *  Not stored on the particle: re-rendering is a thing you do once and look
+ *  at, and three columns on `particles` to remember it would outlive their
+ *  usefulness. The cost of that choice is honest and worth knowing — leave
+ *  this page, or republish from the editor, and the next clip is the
+ *  automatic one again.
+ *
+ *  Null until the first open, because the default start time isn't a constant:
+ *  prerollFor() reads it off this particular effect. */
+let clip = null;
+
+function clipDefaults() {
+  return {
+    format: row.preview_type === 'image/gif' ? 'gif' : 'auto',
+    start: prerollFor(row.data),
+    speed: 1,
+    seconds: PREVIEW_DEFAULT_SECONDS.video,
+  };
+}
+
+/** Opens the clip dialog. Everything about what gets recorded lives here; the
+ *  owner box below just says what is currently attached. */
+function showClipDialog() {
   if (!player?.ok || !player.camera) {
     return toast('Needs WebGPU — this browser can\'t render the clip.');
   }
+  clip ||= clipDefaults();
+  const opt = (v, label, sel) => `<option value="${v}" ${v === sel ? 'selected' : ''}>${label}</option>`;
+  const div = el(`<div>
+    <div class="clip-grid">
+      <div class="field"><label for="clip-format">Format</label>
+        <select id="clip-format">
+          ${opt('auto', 'Video', clip.format)}${opt('gif', 'GIF', clip.format)}
+        </select>
+        <div class="hint">What the shared link embeds.</div></div>
+      <div class="field"><label for="clip-speed">Speed</label>
+        <select id="clip-speed">
+          ${CLIP_LIMITS.speeds.map((v) => opt(v, `${v}×`, clip.speed)).join('')}
+        </select>
+        <div class="hint">Below 1× records in slow motion.</div></div>
+      <div class="field"><label for="clip-start">Start at (s)</label>
+        <input type="number" id="clip-start" value="${clip.start}"
+          min="${CLIP_LIMITS.start.min}" max="${CLIP_LIMITS.start.max}" step="${CLIP_LIMITS.start.step}">
+        <div class="hint">Skips ahead, by running the effect — a long skip takes a moment.</div></div>
+      <div class="field"><label for="clip-seconds">Length (s)</label>
+        <input type="number" id="clip-seconds" value="${clip.seconds}"
+          min="${CLIP_LIMITS.seconds.min}" max="${CLIP_LIMITS.seconds.max}" step="${CLIP_LIMITS.seconds.step}">
+        <div class="hint">How long the card plays before it loops.</div></div>
+    </div>
+    <p class="muted" id="clip-summary"></p>
+    <p class="muted">Right now it embeds ${previewStateText()}</p>
+    <div class="btn-row" style="display:flex;gap:8px;align-items:center;margin-top:12px">
+      <button class="btn accent" id="clip-go">Render clip</button>
+      <span class="muted" id="clip-status"></span>
+    </div></div>`);
+  modal('Link preview clip', div);
+
+  // One description of the two number fields, shared by the read and the
+  // clamp, so what the summary says and what the field shows can't drift.
+  const nums = [
+    ['start', '#clip-start', CLIP_LIMITS.start, 0],
+    ['seconds', '#clip-seconds', CLIP_LIMITS.seconds, PREVIEW_DEFAULT_SECONDS.video],
+  ];
+  const value = ([, id, { min, max }, fallback]) => {
+    const v = parseFloat(div.querySelector(id).value);
+    return Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
+  };
+  const read = () => {
+    clip = {
+      format: div.querySelector('#clip-format').value,
+      speed: parseFloat(div.querySelector('#clip-speed').value) || 1,
+      ...Object.fromEntries(nums.map((f) => [f[0], value(f)])),
+    };
+    return clip;
+  };
+
+  // The one number nobody can do in their head while choosing: speed changes
+  // how much of the effect is in the clip, not how long the clip runs.
+  const summary = div.querySelector('#clip-summary');
+  const sync = () => {
+    const c = read();
+    const covered = c.seconds * c.speed;
+    summary.textContent = `A ${c.seconds}s clip covering ${covered.toFixed(1)}s of the effect`
+      + `${c.start > 0 ? `, from ${c.start}s in` : ', from the start'}.`
+      + (c.format === 'gif' ? ' GIFs cost far more per second than video.' : '');
+  };
+  div.querySelectorAll('select, input').forEach((n) => n.addEventListener('input', sync));
+  // Clamped on commit rather than on every keystroke, so typing "12" doesn't
+  // fight the cursor at "1" — but once focus leaves, the field shows the
+  // number that will actually be recorded rather than the one that was typed.
+  nums.forEach((f) => div.querySelector(f[1]).addEventListener('change', (e) => {
+    e.target.value = value(f);
+    sync();
+  }));
+  // The two formats want different lengths — a GIF second costs several times
+  // what a video second does. Swap the prefill when the field is still showing
+  // the other format's default; a number the owner typed is theirs and stays.
+  const lenIn = div.querySelector('#clip-seconds');
+  div.querySelector('#clip-format').addEventListener('change', (e) => {
+    const [mine, theirs] = e.target.value === 'gif'
+      ? [PREVIEW_DEFAULT_SECONDS.gif, PREVIEW_DEFAULT_SECONDS.video]
+      : [PREVIEW_DEFAULT_SECONDS.video, PREVIEW_DEFAULT_SECONDS.gif];
+    if (parseFloat(lenIn.value) === theirs) {
+      lenIn.value = mine;
+      sync();
+    }
+  });
+  sync();
+
+  div.querySelector('#clip-go').addEventListener('click', (e) =>
+    renderPreview(e.currentTarget, div.querySelector('#clip-status'), read()));
+}
+
+/** Re-renders the preview clip from this page, so particles published before
+ *  previews existed (or edited since) can get one without a trip to the
+ *  editor. Owner only — the storage path is keyed to the uploader. */
+async function renderPreview(btn, state, settings) {
   btn.disabled = true;
   const wasPlaying = player.playing;
   player.stop();                       // free the GPU for the offscreen render
   try {
-    const clip = await capturePreviewClip({
+    const made = await capturePreviewClip({
       data: row.data,
       camera: player.camera,
       // Not allowCompile: this is a gallery page, which must never fetch the
       // 24 MB Slang compiler. Published effects carry their WGSL — if this one
       // doesn't, the player above is already saying so.
       allowCompile: false,
-      format: $('prev-format')?.value || 'auto',
+      ...settings,
       onProgress: (p) => {
         state.textContent = `rendering… ${Math.round(Math.min(1, p) * 100)}%`;
       },
     });
-    if (!clip) return;
+    if (!made) return;
     state.textContent = 'uploading…';
-    const url = await api.uploadPreview(row.id, clip);
+    const url = await api.uploadPreview(row.id, made);
     Object.assign(row, {
-      preview_url: url, preview_type: clip.type,
-      preview_w: clip.w, preview_h: clip.h,
+      preview_url: url, preview_type: made.type,
+      preview_w: made.w, preview_h: made.h,
     });
 
     // Refresh the still as well. It is the poster frame for the clip and the
@@ -300,14 +409,17 @@ async function renderPreview(btn, state) {
       console.warn('thumbnail refresh failed', e);
     }
 
-    btn.textContent = 'Re-render clip';
     toast('Preview updated');
   } catch (e) {
     toast(`Failed: ${e.message}`);
   } finally {
-    // Reads from `row`, so it says the right thing whether or not that update
-    // landed — no path leaves a stale "rendering… 100%" behind.
-    state.textContent = previewStateText();
+    // Both read from `row`, so they say the right thing whether or not that
+    // update landed — no path leaves a stale "rendering… 100%" behind.
+    state.textContent = '';
+    const box = $('prev-state');
+    if (box) box.textContent = previewStateText();
+    const again = $('btn-preview');
+    if (again) again.textContent = row.preview_url ? 'Re-render clip…' : 'Render clip…';
     btn.disabled = false;
     if (wasPlaying) player.start();
   }
@@ -316,8 +428,7 @@ async function renderPreview(btn, state) {
 function wireActions(isOwner, isAdmin) {
   $('btn-share').addEventListener('click', showShare);
 
-  $('btn-preview')?.addEventListener('click', (e) =>
-    renderPreview(e.currentTarget, $('prev-state')));
+  $('btn-preview')?.addEventListener('click', showClipDialog);
 
   $('btn-like').addEventListener('click', async () => {
     if (row.legacy) return toast('Legacy effect — likes unavailable');

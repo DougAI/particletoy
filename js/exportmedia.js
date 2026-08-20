@@ -12,6 +12,39 @@ import { GIFEncoder, quantize, applyPalette } from './vendor/gifenc.js';
 
 export const MAX_EXPORT_SECONDS = 15;
 
+// Largest slice of simulated time taken in a single step. A particle sim
+// integrates once per step, so an oversized dt doesn't merely look choppy —
+// gravity and drag land the particles somewhere else entirely. 1/30 is what a
+// default 30 fps clip has always stepped, so nothing about a 1x clip changes;
+// coarser steps (a 2x clip, or GIF's 12 fps) get split instead of stretched.
+const MAX_SIM_DT = 1 / 30;
+
+// Sim steps between breaths while winding an effect forward. Half a second of
+// simulated time: often enough that the tab keeps painting and Cancel keeps
+// working, rare enough that the yields don't dominate the wind-forward.
+const YIELD_EVERY = 15;
+
+/** The ranges the preview controls offer, and what they mean.
+ *
+ *  start   simulated seconds to run before the first recorded frame. Defaults
+ *          to whatever prerollFor() reads off the effect.
+ *  speed   simulated seconds per second of clip: 0.5 is slow motion, 2 fits
+ *          twice as much effect into the same file. The choices match the
+ *          editor's own time-scale control so the numbers mean one thing
+ *          across the app.
+ *  seconds how long the finished clip runs. Unchanged by speed — speed decides
+ *          how much effect is inside it, not how long it plays.
+ *
+ *  The cap on start is a wall-clock cap in disguise: winding forward is not a
+ *  seek, it is the simulation actually being run (see prerollTo), so a minute
+ *  of skip-ahead is a minute-ish of somebody watching a progress bar.
+ */
+export const CLIP_LIMITS = {
+  start:   { min: 0, max: 30, step: 0.5 },
+  speeds:  [0.25, 0.5, 1, 2],
+  seconds: { min: 1, max: MAX_EXPORT_SECONDS, step: 0.5 },
+};
+
 // Download quality first: VP9 is smaller and cleaner than H.264 at the same
 // bitrate, and every browser that can record at all plays back WebM.
 const DOWNLOAD_CODECS = [
@@ -145,6 +178,14 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** How many steps `seconds` of simulated time has to be cut into, and how big
+ *  each one is. Splitting evenly rather than taking MAX_SIM_DT slices and a
+ *  remainder keeps every step the same size, which is what the sim wants. */
+function stepPlan(seconds) {
+  const steps = Math.max(1, Math.ceil(seconds / MAX_SIM_DT));
+  return { steps, dt: seconds / steps };
+}
+
 // Run the simulation forward before the first recorded frame. Distinct from
 // warmUp() above, which waits for compiles and then rewinds to t = 0: this
 // deliberately advances simulated time. An effect at t = 0 has no particles in
@@ -152,25 +193,68 @@ function wait(ms) {
 // download the viewer scrubs, useless for a preview card where those first
 // frames are the whole impression. Runs after warmUp(), so the rewind doesn't
 // undo it.
-function preroll(player, seconds, dt, w, h) {
-  for (let i = Math.round(seconds / dt); i > 0; i--) stepAndRender(player, dt, w, h);
+//
+// It renders every step and throws all of them away, which looks wasteful and
+// isn't: a shader-mode emitter's compute pass is driven by the render, not by
+// step() — step() only banks the spawn budget and the dt the next render will
+// consume (see particles.js). Stepping without rendering would advance the
+// CPU-side clock past a GPU sim that never moved. There is no seek here to
+// reach for instead; winding forward *is* running the effect.
+//
+// Async, and yielding every so often, because the owner picks this number: at
+// the top of the range it is nine hundred renders, and a synchronous run of
+// those is a frozen tab with a dead Cancel button on it. Nothing is being
+// recorded yet, so the pauses cost the clip nothing.
+async function prerollTo(player, seconds, w, h, { onStep, signal } = {}) {
+  if (!(seconds > 0)) return;
+  const { steps, dt } = stepPlan(seconds);
+  for (let i = 0; i < steps; i++) {
+    if (signal?.cancelled) return;
+    stepAndRender(player, dt, w, h);
+    onStep?.();
+    if (i % YIELD_EVERY === YIELD_EVERY - 1) await wait(0);
+  }
 }
 
-/** @param opts { data, camera, w, h, fps, seconds, pipeline, mimeType, bitrate,
- *                preroll, onProgress, signal } */
+/** Everything the two exporters share about *when* the clip is, resolved and
+ *  clamped once so a caller can pass whatever a form gave it. Exported for
+ *  exportmedia.test.mjs, which is the only thing outside this file to call it.
+ *
+ *  Speed is deliberately not applied to `seconds` or to the frame cadence: a
+ *  2x clip is the same length and the same smoothness as a 1x one, it just
+ *  covers twice as much of the effect. What moves is how far the simulation
+ *  travels between two recorded frames — and once that slice grows past
+ *  MAX_SIM_DT it is walked in sub-steps rather than taken in one lurch, so
+ *  the fast clip is a fast clip and not a coarser sim. */
+export function clipTiming(opts, fps) {
+  const seconds = Math.min(MAX_EXPORT_SECONDS, Math.max(0.5, opts.seconds));
+  const speed = Math.min(8, Math.max(0.05, Number.isFinite(opts.speed) ? opts.speed : 1));
+  const start = Math.min(CLIP_LIMITS.start.max, Math.max(0, opts.preroll || 0));
+  const totalFrames = Math.max(1, Math.round(seconds * fps));
+  const { steps: sub, dt } = stepPlan(speed / fps);
+  // Sized before anything runs so the bar moves at one rate throughout: a long
+  // skip-ahead is real work and reporting 0% through all of it reads as a hang.
+  const prerollSteps = start > 0 ? stepPlan(start).steps : 0;
+  return { seconds, speed, start, totalFrames, sub, dt,
+           totalSteps: prerollSteps + totalFrames * sub };
+}
+
+/** @param opts { data, camera, w, h, fps, seconds, speed, pipeline, mimeType,
+ *                bitrate, preroll, onProgress, signal } */
 export async function exportVideo(opts) {
   const { data, camera, w, h, fps, pipeline, onProgress, signal } = opts;
   const mimeType = opts.mimeType || getVideoMimeType();
   if (!mimeType) throw new Error('Video recording is not supported in this browser.');
-  const seconds = Math.min(MAX_EXPORT_SECONDS, Math.max(0.5, opts.seconds));
-  const totalFrames = Math.max(1, Math.round(seconds * fps));
-  const dt = 1 / fps;
+  const { start, totalFrames, sub, dt, totalSteps } = clipTiming(opts, fps);
+  let done = 0;
 
   const { canvas, player } = await makeExportPlayer({
     data, camera, pipeline, w, h, signal, allowCompile: opts.allowCompile ?? true,
   });
   try {
-    preroll(player, opts.preroll || 0, dt, w, h);
+    await prerollTo(player, start, w, h,
+      { signal, onStep: () => onProgress?.(++done / totalSteps) });
+    if (signal?.cancelled) return null;
     if (typeof canvas.captureStream !== 'function') {
       throw new Error('This browser cannot record a canvas — try GIF instead.');
     }
@@ -186,12 +270,23 @@ export async function exportVideo(opts) {
     const stopped = new Promise((resolve) => { rec.onstop = resolve; });
     rec.start();
 
+    // Paced against a fixed deadline rather than sleeping a frame's worth after
+    // each one. MediaRecorder timestamps by wall clock, so the recorded clip is
+    // as long as the loop takes: sleep 1/fps *plus* however long the renders
+    // took and every clip comes out slow and overlong, by more the heavier the
+    // effect — and a 2x clip, which renders several sub-steps per frame, worst
+    // of all. Against a deadline the render time is absorbed by the wait
+    // instead of added to it, and a machine too slow to keep up degrades by
+    // dropping frames at the right speed instead of stretching the clip.
+    const frameMs = 1000 / fps;
+    const startedAt = performance.now();
     for (let i = 0; i < totalFrames; i++) {
       if (signal?.cancelled) break;
-      stepAndRender(player, dt, w, h);
+      for (let k = 0; k < sub; k++) stepAndRender(player, dt, w, h);
       if (manual) track.requestFrame();
-      onProgress?.(i / totalFrames);
-      await wait(1000 / fps);
+      done += sub;
+      onProgress?.(done / totalSteps);
+      await wait(Math.max(0, startedAt + (i + 1) * frameMs - performance.now()));
     }
     rec.stop();
     await stopped;
@@ -208,13 +303,16 @@ export async function exportVideo(opts) {
   }
 }
 
-/** @param opts { data, camera, w, h, fps, seconds, pipeline, preroll, onProgress, signal } */
+/** @param opts { data, camera, w, h, fps, seconds, speed, pipeline, preroll,
+ *                onProgress, signal } */
 export async function exportGif(opts) {
   const { data, camera, w, h, fps, pipeline, onProgress, signal } = opts;
-  const seconds = Math.min(MAX_EXPORT_SECONDS, Math.max(0.5, opts.seconds));
-  const totalFrames = Math.max(1, Math.round(seconds * fps));
-  const dt = 1 / fps;
+  const { start, totalFrames, sub, dt, totalSteps } = clipTiming(opts, fps);
+  // The frame delay is what makes the GIF play at the right speed, and it is
+  // fps alone — speed has already been spent on how far the sim moves between
+  // frames. No pacing loop to match it: nothing here records in real time.
   const delay = Math.round(1000 / fps);
+  let done = 0;
 
   const { canvas, player } = await makeExportPlayer({
     data, camera, pipeline, w, h, signal, allowCompile: opts.allowCompile ?? true,
@@ -225,17 +323,20 @@ export async function exportGif(opts) {
   const ctx = read.getContext('2d', { willReadFrequently: true });
 
   try {
-    preroll(player, opts.preroll || 0, dt, w, h);
+    await prerollTo(player, start, w, h,
+      { signal, onStep: () => onProgress?.(++done / totalSteps) });
+    if (signal?.cancelled) return null;
     const gif = GIFEncoder();
     for (let i = 0; i < totalFrames; i++) {
       if (signal?.cancelled) return null;
-      stepAndRender(player, dt, w, h);
+      for (let k = 0; k < sub; k++) stepAndRender(player, dt, w, h);
       ctx.drawImage(canvas, 0, 0, w, h);
       const { data: pixels } = ctx.getImageData(0, 0, w, h);
       const palette = quantize(pixels, 256);
       const index = applyPalette(pixels, palette);
       gif.writeFrame(index, w, h, { palette, delay });
-      onProgress?.(i / totalFrames);
+      done += sub;
+      onProgress?.(done / totalSteps);
       await new Promise(requestAnimationFrame);
     }
     gif.finish();
@@ -257,6 +358,15 @@ const PREVIEW_VIDEO = { w: 960, h: 540, fps: 30, seconds: 3.5, bitrate: 2_500_00
 // second of motion — though less than you would think for this subject:
 // particles on black quantize well, and these settings measure ~0.7 MB.
 const PREVIEW_GIF = { w: 640, h: 360, fps: 12, seconds: 3 };
+
+/** What the preview dialogs prefill their length field with. Taken off the
+ *  specs above rather than repeated, so an owner who changes nothing still
+ *  gets exactly the clip the automatic capture would have made — and can see
+ *  what that was before deciding otherwise. */
+export const PREVIEW_DEFAULT_SECONDS = {
+  video: PREVIEW_VIDEO.seconds,
+  gif: PREVIEW_GIF.seconds,
+};
 
 // How long a continuous effect gets to fill the frame before recording starts.
 const PREVIEW_PREROLL = 1.5;
@@ -314,7 +424,8 @@ function packClip(result, spec, fallbackType) {
 }
 
 /** Renders the short looping clip used for link previews.
- *  @param opts { data, camera, pipeline, allowCompile, format, onProgress, signal }
+ *  @param opts { data, camera, pipeline, allowCompile, format,
+ *                start, speed, seconds, onProgress, signal }
  *    allowCompile defaults to false: this one runs from the view page as well
  *    as the editor, and a gallery page must never fetch the Slang compiler.
  *    The editor's publish flow passes true.
@@ -322,17 +433,27 @@ function packClip(result, spec, fallbackType) {
  *    video entirely. Worth knowing before choosing: Discord plays an MP4 given
  *    to it as og:video, but shows only the first frame of a GIF given as
  *    og:image — so 'gif' trades away the motion that most people are after.
+ *    start, speed and seconds are the owner's overrides — see CLIP_LIMITS.
+ *    Each falls back to the automatic choice when it isn't a number, so the
+ *    no-arguments call still produces exactly the clip it always did.
  *  @returns { blob, type, ext, w, h } — or null if cancelled. */
 export async function capturePreviewClip(opts) {
   const {
     data, camera, pipeline = 'deferred', allowCompile = false,
-    format = 'auto', onProgress, signal,
+    format = 'auto', start, speed, seconds, onProgress, signal,
   } = opts;
   // Read off the effect, not fixed: see prerollFor. Named apart from the
-  // preroll() stepper above so neither shadows the other.
-  const prerollSeconds = prerollFor(data);
+  // prerollTo() stepper above so neither shadows the other.
+  const prerollSeconds = Number.isFinite(start) ? start : prerollFor(data);
   const common = {
     data, camera, pipeline, allowCompile, preroll: prerollSeconds, onProgress, signal,
+  };
+  // Length is the one override that can't be a blanket ...spread: video and
+  // GIF carry different defaults for it (a GIF second costs far more than a
+  // video one), and an unset length has to leave each on its own.
+  const tuning = {
+    ...(Number.isFinite(speed) ? { speed } : {}),
+    ...(Number.isFinite(seconds) ? { seconds } : {}),
   };
 
   if (format !== 'gif') {
@@ -342,7 +463,7 @@ export async function capturePreviewClip(opts) {
     const candidates = PREVIEW_CODECS.filter((t) => getVideoMimeType([t]));
     for (const mimeType of candidates) {
       try {
-        const result = await exportVideo({ ...common, ...PREVIEW_VIDEO, mimeType });
+        const result = await exportVideo({ ...common, ...PREVIEW_VIDEO, ...tuning, mimeType });
         if (!result) return null;                    // cancelled
         return packClip(result, PREVIEW_VIDEO, mimeType);
       } catch (ex) {
@@ -351,6 +472,6 @@ export async function capturePreviewClip(opts) {
     }
   }
 
-  const gif = await exportGif({ ...common, ...PREVIEW_GIF });
+  const gif = await exportGif({ ...common, ...PREVIEW_GIF, ...tuning });
   return gif ? packClip(gif, PREVIEW_GIF, 'image/gif') : null;
 }
