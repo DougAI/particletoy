@@ -124,12 +124,12 @@ function render() {
       <div id="cm-list"><div class="spinner">Loading comments…</div></div>
     </section>`;
 
-  mountPlayer();
+  mountPlayer(isOwner);
   wireActions(isOwner, isAdmin);
   loadComments();
 }
 
-function mountPlayer() {
+function mountPlayer(isOwner) {
   const frame = $('player-frame');
   const canvas = document.createElement('canvas');
   frame.appendChild(canvas);
@@ -140,6 +140,18 @@ function mountPlayer() {
   }
   player.load(row.data);
   player.start();
+
+  // This page has no compiler: it draws an effect from the WGSL published
+  // alongside it, and if a piece of that is missing the emitters using it draw
+  // nothing at all. An empty stage with no explanation looks like a bug in the
+  // site, so name it — and tell the one person who can fix it how.
+  if (player.unrenderable) {
+    const note = document.createElement('div');
+    note.className = 'player-note';
+    note.textContent = `This effect was ${player.unrenderable}, so its particles can’t be drawn here.`
+      + (isOwner ? ' Open it in the editor and save it again to fix that.' : '');
+    frame.appendChild(note);
+  }
 
   let particles = 0;
   setInterval(() => {

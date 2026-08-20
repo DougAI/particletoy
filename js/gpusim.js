@@ -13,7 +13,7 @@ import {
   SIM_FIELDS, SHAPE_INDEX, PROPS_SIM_SRC, WORKGROUP_SIZE,
 } from './simlib.js';
 import { loadSlang, compileSlang, STAGE } from './slangc.js';
-import { simFromCache } from './wgslcache.js';
+import { simEntry, simFromCache, simKey } from './wgslcache.js';
 import { degToRad } from './math3d.js';
 
 const nextPow2 = (x) => { let n = 1; while (n < x) n <<= 1; return n; };
@@ -143,6 +143,11 @@ export class SimRuntime {
     this.pipeSpawn = null;
     this.pipeUpdate = null;
     this.errors = [];
+    // The WGSL these pipelines were built from, stamped with the key of the
+    // source it came from, ready to be saved with the effect (wgslcache.js).
+    this.cacheEntry = null;
+    // The compile in flight, so a save can wait for it (main.js settleCompiles).
+    this.pending = null;
     this.dirty = true;       // shader source / fields changed
     this.capacity = 0;
     this.resetPending = true;
@@ -217,16 +222,28 @@ export class SimRuntime {
   }
 
   /** Recompiles the sim module (fields or source changed). */
-  async compile() {
+  compile() {
+    const job = this._compile().finally(() => {
+      if (this.pending === job) this.pending = null;
+    });
+    this.pending = job;
+    return job;
+  }
+
+  async _compile() {
     const seq = ++this._seq;
     this.dirty = false;
     const em = this.em;
     const userCode = em.p.simSrc?.trim() ? em.p.simSrc : PROPS_SIM_SRC;
+    // The key of the source this run compiles, taken before the first await:
+    // an edit that lands while the 24 MB compiler downloads must retire this
+    // run's WGSL, not rename it after the source it no longer matches.
+    const key = simKey(em.p);
 
     // Cached path: the WGSL saved with the effect still matches this source, so
     // the compiler isn't needed. This is how the gallery runs compute sims.
     const cached = simFromCache(this.renderer.wgslCache, em.p);
-    if (cached && await this._buildPipelines(seq, cached)) return this.errors;
+    if (cached && await this._buildPipelines(seq, cached, key)) return this.errors;
 
     if (!this.renderer.allowCompile) {
       const errs = [{ stage: 'sim', variant: '', line: 0,
@@ -256,7 +273,7 @@ export class SimRuntime {
       errors.push({ stage: 'sim', variant: '', line: 0, msg: e.msg });
     }
     if (res && !res.errors.length) {
-      if (!await this._buildPipelines(seq, slang.wgsl)) {
+      if (!await this._buildPipelines(seq, slang.wgsl, key)) {
         errors.push({ stage: 'sim', variant: '', line: 0, msg: 'pipeline creation failed' });
       }
     }
@@ -268,7 +285,7 @@ export class SimRuntime {
    * Builds both compute pipelines from WGSL, skipping Slang. Returns false if
    * the WGSL turns out unusable, which the cached path treats as a miss.
    */
-  async _buildPipelines(seq, wgsl) {
+  async _buildPipelines(seq, wgsl, key) {
     const res = await compileModule(this.device, wgsl, `sim:${this.em.p.name}`);
     if (res.errors.length) return false;
     try {
@@ -281,7 +298,7 @@ export class SimRuntime {
         this.pipeUpdate = update;
         // Kept so it can be saved with the effect — the gallery pages render
         // from that cache instead of loading the compiler.
-        this.compiledWGSL = wgsl;
+        this.cacheEntry = simEntry(this.em.p, wgsl, key);
         this.errors = [];
         // The field layout may have changed, so existing particle state is
         // stale and gets cleared. Replay the emitter's spawn timeline too:

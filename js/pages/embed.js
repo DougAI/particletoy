@@ -78,10 +78,10 @@ function credit(row) {
     `<a href="${esc(new URL(pageUrl, location.href).href)}" target="_blank" rel="noopener">${label}</a>`;
 }
 
-/** No WebGPU (Safari, older Chrome, most in-app browsers): show the same clip
- *  the link preview uses, or the still, rather than an apology. The embed is
- *  a picture of the effect either way. */
-function fallback(row) {
+/** No WebGPU (Safari, older Chrome, most in-app browsers), or nothing to draw
+ *  with: show the same clip the link preview uses, or the still, rather than an
+ *  apology. The embed is a picture of the effect either way. */
+function fallback(row, why) {
   if (row.preview_url && (row.preview_type || '').startsWith('video/')) {
     const v = document.createElement('video');
     Object.assign(v, {
@@ -100,7 +100,7 @@ function fallback(row) {
     stage.appendChild(img);
     return;
   }
-  fail(player?.error || 'WebGPU is not supported by this browser.');
+  fail(why || player?.error || 'WebGPU is not supported by this browser.');
 }
 
 function mount(row) {
@@ -128,6 +128,13 @@ function mount(row) {
     fallback(row);
   });
   player.load(row.data);
+  // The effect went up without the compiled shaders this page renders from,
+  // and there is no compiler here to make up the difference. Same answer as no
+  // WebGPU: the clip is a picture of the effect, an empty stage is not.
+  if (player.unrenderable) {
+    canvas.remove();
+    return fallback(row, `This effect was ${player.unrenderable}.`);
+  }
   player.start();
 
   // A card scrolled off the timeline is still running a GPU simulation.

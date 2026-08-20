@@ -12,6 +12,7 @@ import { OrbitCamera } from './camera.js';
 import { Emitter, defaultEmitterParams } from './particles.js';
 import { makeMaterial, MaterialRuntime } from './materials.js';
 import { isPreSlang } from './share.js';
+import { cacheGaps } from './wgslcache.js';
 
 function mergeEmitterParams(p) {
   const d = defaultEmitterParams();
@@ -43,6 +44,7 @@ export class EffectPlayer {
     this.scene = defaultScene();
     this.device = null;
     this._pendingData = null;
+    this.unrenderable = null;   // why the loaded effect can't be drawn, if it can't
     this._wantPlay = false;
     this._loading = Promise.resolve();
 
@@ -69,6 +71,15 @@ export class EffectPlayer {
 
   load(data) {
     this._pendingData = data;
+    // Answered here rather than in _load, which waits on the device: callers
+    // put this on screen the moment they hand the effect over.
+    //
+    // A partly-filled cache is as fatal as no cache at all — one missing
+    // module and every emitter using it draws nothing — so ask what the
+    // effect is actually missing, not whether it brought anything.
+    this.unrenderable = isPreSlang(data) ? 'made with an older shader language'
+      : !this.allowCompile && cacheGaps(data).length ? 'saved without its compiled shaders'
+      : null;
     if (this.device) this._load(data);
   }
 
@@ -83,9 +94,6 @@ export class EffectPlayer {
     // export — pass allowCompile and get the source path as a fallback.
     this.renderer.wgslCache = data.wgslCache ?? null;
     this.renderer.allowCompile = this.allowCompile;
-    this.unrenderable = isPreSlang(data) ? 'made with an older shader language'
-      : !data.wgslCache && !this.allowCompile ? 'saved without compiled shaders'
-      : null;
 
     const materials = (data.materials || []).map((m) => ({ ...makeMaterial({}), ...m }));
     if (!materials.length) materials.push(makeMaterial({ name: 'Default' }));
