@@ -14,17 +14,19 @@
 
      Two modes, and the plain URL is the careful one:
 
-       embed.html?id=…                 decorative. No anchors anywhere in the
+       embed.html?id=…                 the card. No anchors anywhere in the
                                        document, so the frame cannot navigate
                                        — by construction, not by good manners
-                                       — and no pointer events, so a drag or a
-                                       scroll over the card belongs to the
-                                       page around it rather than the orbit
-                                       camera. This is the card.
-       embed.html?id=…&interactive=1   orbit, zoom, controls, and a credit
-                                       linking back to the particle's page.
-                                       What Share hands out for an iframe in
-                                       someone's own article.
+                                       — and no pointer events on the stage,
+                                       so a drag or a scroll over it belongs
+                                       to the page around it rather than the
+                                       orbit camera. Play/pause and restart
+                                       still work: a button is not an anchor
+                                       and does not swallow a wheel.
+       embed.html?id=…&interactive=1   orbit and zoom on the effect itself,
+                                       plus a credit linking back to the
+                                       particle's page. What Share hands out
+                                       for an iframe in someone's own article.
 
      No preview card of its own on purpose: this page is never the thing you
      share. view.html is the shareable page, and og/index.js renders its card. -->
@@ -88,8 +90,10 @@
   }
   .btn:hover { border-color: #4a5162; }
   .spacer { flex: 1; }
-  .hint { color: #8b909c; }
-  @media (max-width: 460px) { .hint { display: none; } }
+  /* Orbit and zoom are the interactive mode's alone, so the hint naming them
+     is too — and it is still the first thing to go when the bar gets tight. */
+  .hint { display: none; color: #8b909c; }
+  @media (min-width: 461px) { body.interactive .hint { display: inline; } }
 
   /* Top-right corner: who made it and where it lives. Interactive mode only —
      it is the one link in the document, and the card is the mode that must

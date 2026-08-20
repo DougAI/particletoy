@@ -9,14 +9,17 @@
 // Two modes, and the plain ?id= URL — the one og/index.js hands X — is the
 // careful one:
 //
-//   decorative (default)     Not one anchor in the document, so the frame has
+//   card (default)           Not one anchor in the document, so the frame has
 //                            nowhere to navigate to; that is a property of the
-//                            markup, not of everyone downstream behaving. No
-//                            pointer events either: the orbit camera captures
-//                            the pointer and preventDefaults the wheel, which
-//                            inside a card means a drag or a scroll over it
-//                            never reaches the timeline underneath.
-//   ?interactive=1           Orbit, zoom, the controls bar, and a credit
+//                            markup, not of everyone downstream behaving. The
+//                            stage takes no pointer events either: the orbit
+//                            camera captures the pointer and preventDefaults
+//                            the wheel, which inside a card means a drag or a
+//                            scroll over it never reaches the timeline
+//                            underneath. Play/pause and restart stay: what a
+//                            card must not do is navigate or eat the scroll,
+//                            and a button does neither.
+//   ?interactive=1           Orbit and zoom on the stage itself, plus a credit
 //                            linking back to the particle's page. What Share
 //                            hands out for an iframe in someone's own article,
 //                            where the frame is the thing you came to touch.
@@ -135,12 +138,14 @@ function mount(row) {
     else if (!document.hidden && pausedByHide) { player.start(); pausedByHide = false; }
   });
 
-  if (interactive) wireControls(row);
+  wireControls(row);
 }
 
-/** Play/pause, restart and a particle count. Only mounted in interactive
- *  mode — buttons don't navigate, but a decorative card has nothing to
- *  operate and shouldn't grow a UI. */
+/** Play/pause, restart and a particle count — in both modes. Withholding them
+ *  from the card was a step too far: neither button navigates, and they sit in
+ *  a strip where only the buttons themselves take pointer events, so a wheel
+ *  over one still scrolls the timeline behind it. Nothing that made the card
+ *  decorative is spent here. The stage is what stays untouchable. */
 function wireControls(row) {
   const toggle = $('pl-toggle');
   $('bar').hidden = false;
@@ -164,16 +169,16 @@ function wireControls(row) {
 }
 
 (async function boot() {
-  if (interactive) {
-    document.body.classList.add('interactive');
-    // Hover reveals the controls on a desktop; there is no hover on a phone,
-    // so there they simply stay up.
-    if (window.matchMedia?.('(hover: none)').matches) document.body.classList.add('touch');
-    // Show them once on arrival regardless, then get out of the way: nobody
-    // uses controls they don't know are there.
-    document.body.classList.add('reveal');
-    setTimeout(() => document.body.classList.remove('reveal'), 2600);
-  }
+  if (interactive) document.body.classList.add('interactive');
+
+  // Both modes, because both have controls now. Hover reveals them on a
+  // desktop; there is no hover on a phone, so there they simply stay up —
+  // which on a timeline is the only thing keeping them reachable at all.
+  if (window.matchMedia?.('(hover: none)').matches) document.body.classList.add('touch');
+  // Show them once on arrival regardless, then get out of the way: nobody
+  // uses controls they don't know are there.
+  document.body.classList.add('reveal');
+  setTimeout(() => document.body.classList.remove('reveal'), 2600);
 
   if (!id) return fail('No particle to show.');
   let row = null;

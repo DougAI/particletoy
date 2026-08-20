@@ -117,10 +117,11 @@ tonemapping.
   owners can flip particles **public/private**, edit, or delete
 - **Embeds** ([embed.html](embed.html)) — the same live player with no site chrome
   around it, for `<iframe>`s and for X's player card; falls back to the particle's
-  clip or still where WebGPU isn't available. The plain URL is *decorative* — not an
-  anchor in the document and no pointer events, so a card can't navigate anywhere or
-  swallow a timeline's scroll; `&interactive=1` turns on orbit, controls and a credit
-  link. **Share** on any particle page hands out the iframe snippet
+  clip or still where WebGPU isn't available. The plain URL is the *card* — not an
+  anchor in the document and no pointer events on the stage, so it can't navigate
+  anywhere or swallow a timeline's scroll, though play/pause and restart still work;
+  `&interactive=1` turns on orbit, zoom and a credit link. **Share** on any particle
+  page hands out the iframe snippet
 - **Browse** ([browse.html](browse.html)) — full-text search, tag filters,
   newest/popular/loved sorting, pagination
 - **Publish from the editor** — captures a thumbnail and a short preview clip and saves
