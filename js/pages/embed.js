@@ -9,20 +9,24 @@
 // Two modes, and the plain ?id= URL — the one og/index.js hands X — is the
 // careful one:
 //
-//   card (default)           Not one anchor in the document, so the frame has
-//                            nowhere to navigate to; that is a property of the
-//                            markup, not of everyone downstream behaving. The
-//                            stage takes no pointer events either: the orbit
+//   card (default)           The stage takes no pointer events: the orbit
 //                            camera captures the pointer and preventDefaults
 //                            the wheel, which inside a card means a drag or a
 //                            scroll over it never reaches the timeline
-//                            underneath. Play/pause and restart stay: what a
-//                            card must not do is navigate or eat the scroll,
-//                            and a button does neither.
-//   ?interactive=1           Orbit and zoom on the stage itself, plus a credit
-//                            linking back to the particle's page. What Share
+//                            underneath. Play/pause, restart and the corner
+//                            credit are all here — what a card must not do is
+//                            steal the gesture going past it or navigate the
+//                            page out from under someone, and a button does
+//                            neither, nor does one target=_blank anchor.
+//   ?interactive=1           Orbit and zoom on the stage itself. What Share
 //                            hands out for an iframe in someone's own article,
 //                            where the frame is the thing you came to touch.
+//
+// This page did briefly hold no anchor at all, on the theory that a frame
+// which cannot navigate by construction beats one that merely behaves. It
+// also left the effect's own name unclickable on a timeline, which is the
+// one thing a card is for. So: exactly one anchor, opening in a new tab, so
+// the frame navigates nowhere and neither does the page hosting it.
 //
 // Deliberately anonymous either way — no initBackend(), no session. Nothing
 // here is owner-only, an embed of a private particle is not a thing (the
@@ -50,8 +54,10 @@ function esc(s) {
   ));
 }
 
-/** Whatever went wrong, say so — a black rectangle explains nothing. The way
- *  out is only offered in interactive mode; the card stays anchor-free. */
+/** Whatever went wrong, say so — a black rectangle explains nothing. No way
+ *  out offered on the card: unlike the credit, this link would open a page
+ *  that says the same thing back (the particle is gone, or private), and the
+ *  post carrying the card already links there. */
 function fail(text) {
   const out = interactive
     ? `<a href="${esc(pageUrl)}" target="_blank" rel="noopener">Open on particletoy →</a>`
@@ -59,10 +65,11 @@ function fail(text) {
   stage.innerHTML = `<div id="msg"><div>${esc(text)}</div>${out}</div>`;
 }
 
-/** Who made it, linking back to the particle's page. Interactive mode only:
- *  on a timeline the tweet already carries the link and the card already
- *  carries the title, so this would be a third copy — and the one anchor in a
- *  frame that is supposed to have none. */
+/** The effect's name in the corner, linking back to its page — in both modes.
+ *  On a timeline it is the only route from the thing playing to the thing it
+ *  came from: a card sitting in someone's feed is often the whole of what a
+ *  reader sees, and a name they cannot click is a dead end. target=_blank, so
+ *  the click opens a tab rather than steering either frame. */
 function credit(row) {
   const author = row.author?.display_name || row.author?.username;
   const label = `<b>${esc(row.title)}</b>${author ? ` by ${esc(author)}` : ''}
@@ -187,7 +194,7 @@ function wireControls(row) {
   } catch { /* offline, or the backend isn't set up — same dead end */ }
   if (!row) return fail("This particle doesn't exist, or it's private.");
 
-  if (interactive) credit(row);
+  credit(row);
   mount(row);
 })();
 

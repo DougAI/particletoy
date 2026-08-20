@@ -14,19 +14,17 @@
 
      Two modes, and the plain URL is the careful one:
 
-       embed.html?id=…                 the card. No anchors anywhere in the
-                                       document, so the frame cannot navigate
-                                       — by construction, not by good manners
-                                       — and no pointer events on the stage,
-                                       so a drag or a scroll over it belongs
-                                       to the page around it rather than the
-                                       orbit camera. Play/pause and restart
-                                       still work: a button is not an anchor
-                                       and does not swallow a wheel.
-       embed.html?id=…&interactive=1   orbit and zoom on the effect itself,
-                                       plus a credit linking back to the
-                                       particle's page. What Share hands out
-                                       for an iframe in someone's own article.
+       embed.html?id=…                 the card. No pointer events on the
+                                       stage, so a drag or a scroll over it
+                                       belongs to the page around it rather
+                                       than the orbit camera. Play/pause,
+                                       restart and the corner credit all work:
+                                       a button swallows no wheel, and the one
+                                       anchor opens a new tab rather than
+                                       steering anybody's frame.
+       embed.html?id=…&interactive=1   orbit and zoom on the effect itself.
+                                       What Share hands out for an iframe in
+                                       someone's own article.
 
      No preview card of its own on purpose: this page is never the thing you
      share. view.html is the shareable page, and og/index.js renders its card. -->
@@ -95,9 +93,10 @@
   .hint { display: none; color: #8b909c; }
   @media (min-width: 461px) { body.interactive .hint { display: inline; } }
 
-  /* Top-right corner: who made it and where it lives. Interactive mode only —
-     it is the one link in the document, and the card is the mode that must
-     not have one. */
+  /* Top-right corner: what it is, who made it, and the way back to its page.
+     The one anchor in the document, in both modes — on a timeline it is the
+     only route out of the card. Same arrangement as the bar: the box itself
+     stays out of the way and only the link takes a click. */
   #credit {
     position: absolute;
     top: 10px; right: 12px;
@@ -110,9 +109,10 @@
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+    pointer-events: none;                 /* the link takes the clicks */
   }
-  body:hover #credit, body.touch #credit, body.reveal #credit { opacity: 1; }
-  #credit a { color: inherit; text-decoration: none; }
+  body:hover #credit, body.touch #credit, body.reveal #credit, #credit:focus-within { opacity: 1; }
+  #credit a { pointer-events: auto; color: inherit; text-decoration: none; }
   #credit a:hover { text-decoration: underline; }
   #credit b { color: #fff; font-weight: 600; }
   #credit .brand { color: #e8a33d; }

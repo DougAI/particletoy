@@ -324,11 +324,13 @@ function particleCard(cfg, p, self) {
   // sign-in button, comments below the fold — inside a 16:9 box on someone's
   // timeline. embed.html is the viewport on its own.
   //
-  // The plain ?id= URL on purpose. That is embed.html's decorative mode: no
-  // anchors in the document, so the frame cannot navigate anywhere, and no
-  // pointer events, so a drag or a scroll over the card reaches the timeline
-  // rather than the orbit camera. Its interactive mode is an opt-in
-  // (&interactive=1) that belongs to embeds someone placed in their own page.
+  // The plain ?id= URL on purpose. That is embed.html's card mode: no pointer
+  // events on the stage, so a drag or a scroll over the card reaches the
+  // timeline rather than the orbit camera. It still plays, pauses, restarts,
+  // and puts the effect's name in the corner linking back to its page — the
+  // only way out of a card, and a new tab rather than a navigation. Orbit and
+  // zoom are the opt-in (&interactive=1) that belongs to embeds someone placed
+  // in their own page.
   // One parameter also means no & to entity-encode into the meta tag, and so
   // nothing for a crawler that parses tags with a regex to mangle.
   const embed = `${cfg.site}/embed.html?id=${p.id}`;
