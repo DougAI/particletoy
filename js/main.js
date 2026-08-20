@@ -8,7 +8,7 @@ import { makeMaterial, MaterialRuntime, serializeMaterial } from './materials.js
 import { PRESETS } from './presets.js';
 import { buildInspector, EditorPanel, modal, toast, showHelp, setHistoryRecorder, isTextEditing } from './ui.js';
 import { History } from './history.js';
-import { buildCache } from './wgslcache.js';
+import { buildCache, cacheGaps } from './wgslcache.js';
 import {
   serializeState, isPreSlang, encodeShareString, decodeShareString,
   loadLibrary, saveToLibrary, deleteFromLibrary, downloadJSON, downloadBlob, pickJSONFile,
@@ -191,6 +191,55 @@ function currentData({ withCache = false } = {}) {
   return serializeState(app.name, app.emitters, app.materials.map(serializeMaterial), app.scene, cache);
 }
 
+// A frame, or a quarter second — whichever lands first. Compiles are kicked
+// off from the frame loop, which a backgrounded tab stops calling; the timer
+// keeps a wait from hanging on one and lets it reach its deadline instead.
+const nextTick = () => Promise.race([
+  new Promise((resolve) => requestAnimationFrame(resolve)),
+  new Promise((resolve) => setTimeout(resolve, 250)),
+]);
+
+/**
+ * Waits until nothing is compiling and nothing is waiting to.
+ *
+ * The cache written into a save is whatever the runtimes have finished
+ * compiling at that instant, and a compile in flight leaves a hole — which, on
+ * a gallery page that has no compiler to fall back on, is an effect with no
+ * particles in it. The window is wide enough to walk into: Slang arrives as a
+ * 24 MB wasm module fetched on the first compile of a session, and an effect
+ * opened from a save renders from its cache without ever waking it, so the
+ * first edit after that is the one that waits on the network.
+ *
+ * Compiles are kicked off from the frame loop, so this steps frame by frame
+ * until the runtimes go quiet. Returns false if they never do, which the
+ * caller reports as the gap it is rather than blocking the save forever.
+ */
+async function settleCompiles(timeoutMs = 30000) {
+  const deadline = performance.now() + timeoutMs;
+  for (;;) {
+    const jobs = [];
+    let queued = false;
+    // A material picks up its runtime on the first frame after a load, so one
+    // without a runtime yet has a compile ahead of it just as a dirty one does.
+    for (const m of app.materials) if (!app.materialRuntimes.has(m.id)) queued = true;
+    for (const rt of app.materialRuntimes.values()) {
+      if (rt.pending) jobs.push(rt.pending);
+      if (rt.dirty) queued = true;
+    }
+    for (const em of app.emitters) {
+      if (em.simRt?.pending) jobs.push(em.simRt.pending);
+      // A shader-sim emitter picks up its runtime on the frame it is drawn, so
+      // one that has none yet still has a compile ahead of it.
+      if (em.p.enabled && app.materialRuntimes.has(em.p.materialId)
+          && em.p.simMode === 'shader' && (!em.simRt || em.simRt.dirty || em.simDirty)) queued = true;
+    }
+    if (!jobs.length && !queued) return true;
+    if (performance.now() > deadline) return false;
+    // A frame either starts the queued compiles or lets the running ones land.
+    await Promise.all([nextTick(), ...jobs.map((j) => j.catch(() => null))]);
+  }
+}
+
 // ---------------------------------------------------------------- undo/redo
 // Whole-state snapshots round-tripped through the same applyData() used for
 // presets/share links — the one path already trusted to fully replace the
@@ -349,7 +398,8 @@ function wireToolbar() {
     inp.focus();
   });
 
-  document.getElementById('btn-export').addEventListener('click', () => {
+  document.getElementById('btn-export').addEventListener('click', async () => {
+    await settleCompiles();
     downloadJSON(currentData({ withCache: true }), `${(app.name || 'effect').replace(/[^\w-]+/g, '_')}.particletoy.json`);
   });
   document.getElementById('btn-export-media').addEventListener('click', showExportMedia);
@@ -363,7 +413,8 @@ function wireToolbar() {
     }
   });
 
-  document.getElementById('btn-save').addEventListener('click', () => {
+  document.getElementById('btn-save').addEventListener('click', async () => {
+    await settleCompiles();
     saveToLibrary(app.name || 'Untitled', currentData({ withCache: true }));
     toast(`Saved “${app.name}” to library`);
   });
@@ -579,6 +630,10 @@ async function showPublish() {
   });
   syncClip();
 
+  // Flipped by the shader check below, so the warning it prints can be
+  // overruled by clicking again.
+  let publishAnyway = false;
+
   div.querySelector('#pub-go').addEventListener('click', async () => {
     const err = div.querySelector('#pub-err');
     const go = div.querySelector('#pub-go');
@@ -593,7 +648,27 @@ async function showPublish() {
         .split(',').map((t) => t.trim().toLowerCase().replace(/[^a-z0-9\-_ ]/g, '').replace(/\s+/g, '-'))
         .filter(Boolean).slice(0, 12);
       const asCopy = div.querySelector('#pub-copy')?.checked;
-      const payload = { title, description, tags, visibility, data: currentData({ withCache: true }) };
+
+      // The gallery renders a published effect from the WGSL saved beside it
+      // and never loads the compiler, so what the runtimes have compiled by
+      // this instant is what the effect's page gets to draw with. Let the
+      // compiles land first, then say so if anything still has no WGSL to
+      // publish — a hole here is a page with no particles in it and nothing on
+      // screen to explain why.
+      status.textContent = 'Waiting for shaders to finish compiling…';
+      await settleCompiles();
+      status.textContent = '';
+      const data = currentData({ withCache: true });
+      const gaps = cacheGaps(data);
+      if (gaps.length && !publishAnyway) {
+        publishAnyway = true;
+        go.textContent = owner ? 'Save anyway' : 'Publish anyway';
+        err.textContent = `No compiled shader to publish for ${gaps.join(', ')} — the particle’s `
+          + 'page renders from the WGSL saved with it, so it would show nothing. Fix the errors '
+          + 'flagged in the editor and try again, or go ahead anyway.';
+        return;
+      }
+      const payload = { title, description, tags, visibility, data };
 
       let id = cloud.id;
       if (isCloudOwner() && !asCopy) {

@@ -3,7 +3,9 @@
 
 import { compileModule, particleVertexBuffers } from './gpu.js';
 import { loadSlang, compileSlang, STAGE } from './slangc.js';
-import { materialFromCache } from './wgslcache.js';
+import {
+  VARIANTS, materialEntry, materialFromCache, renderVariants, restoredEntry, vsKey, fsKey,
+} from './wgslcache.js';
 import {
   buildParticleVS, buildParticleFS, DEFAULT_VS, DEFAULT_FS,
   GBUF_FORMATS, SCENE_FORMAT, DEPTH_FORMAT,
@@ -61,7 +63,12 @@ export class MaterialRuntime {
     this.material = material;
     this.pipelines = { gbuffer: null, forward: null };
     this.errors = [];   // [{stage: 'vertex'|'fragment', variant, line, msg}]
-    this.compiledWGSL = null; // { vs, gbuffer?, forward?, vertexLocations } once compiled
+    // The WGSL this runtime is rendering from, stamped with the keys of the
+    // source it came from, ready to be saved with the effect. See wgslcache.js.
+    this.cacheEntry = null;
+    // The compile currently in flight, so a save can wait for it rather than
+    // writing a half-filled cache (settleCompiles in main.js).
+    this.pending = null;
     this.dirty = true;
     this._seq = 0;
   }
@@ -99,29 +106,44 @@ export class MaterialRuntime {
    * cached path treats as a miss rather than an error, since the source is
    * still there to recompile from.
    */
-  async _buildPipelines(seq, variants, vsCode, fsCodeFor, vertexLocations) {
+  async _buildPipelines(seq, variants, entry) {
     const device = this.renderer.device;
     const m = this.material;
-    const vsRes = await compileModule(device, vsCode, `${m.name}:vs`);
+    const vsRes = await compileModule(device, entry.vs.code, `${m.name}:vs`);
     if (vsRes.errors.length) return null;
     for (const variant of variants) {
-      const fsRes = await compileModule(device, fsCodeFor(variant), `${m.name}:${variant}`);
+      const fsRes = await compileModule(device, entry[variant].code, `${m.name}:${variant}`);
       if (fsRes.errors.length) return null;
       try {
         const pipeline = await device.createRenderPipelineAsync(
-          this._pipelineDesc(variant, vsRes.module, fsRes.module, vertexLocations));
+          this._pipelineDesc(variant, vsRes.module, fsRes.module, entry.locations));
         if (seq === this._seq) this.pipelines[variant] = pipeline;
       } catch {
         return null;
       }
     }
     if (!isOpaqueMode(m)) this.pipelines.gbuffer = null;
-    if (seq === this._seq) this.errors = [];
+    if (seq === this._seq) {
+      this.errors = [];
+      // Hand the cache straight back. Without this, an effect opened from a
+      // save — which renders entirely from its cache, never waking the
+      // compiler — would hold no WGSL to write out, and publishing it would
+      // strip the shaders off an effect nobody had even edited.
+      this.cacheEntry = restoredEntry(entry, variants);
+    }
     return this.errors;
   }
 
   /** Recompile the variants required by the current pipeline. */
-  async compile(neededVariants) {
+  compile(neededVariants) {
+    const job = this._compile(neededVariants).finally(() => {
+      if (this.pending === job) this.pending = null;
+    });
+    this.pending = job;
+    return job;
+  }
+
+  async _compile(neededVariants) {
     const seq = ++this._seq;
     const device = this.renderer.device;
     const m = this.material;
@@ -129,15 +151,22 @@ export class MaterialRuntime {
     const errors = [];
     const opts = { blendMode: m.blendMode, lit: m.lit, soft: m.softParticles };
 
+    // Keys for the source this compile is about to read. Stamped up front, so
+    // that an edit landing mid-compile — the Slang wasm is 24 MB, the first
+    // compile of a session waits on the network — retires this run's output
+    // instead of publishing it under the new source's name.
+    const keys = { vs: vsKey(m) };
+    for (const variant of VARIANTS) keys[variant] = fsKey(m, variant);
+
     // Blended materials are never drawn through the G-buffer pass.
-    const variants = neededVariants.filter((v) => v !== 'gbuffer' || isOpaqueMode(m));
+    const drawn = renderVariants(m);
+    const variants = neededVariants.filter((v) => drawn.includes(v));
 
     // Cached path: the effect was saved with WGSL matching this exact source,
     // so the compiler is not needed at all. This is how the gallery renders.
     const hit = materialFromCache(this.renderer.wgslCache, m, variants);
     if (hit) {
-      const built = await this._buildPipelines(seq, variants, hit.vs.code,
-        (v) => hit[v].code, hit.locations);
+      const built = await this._buildPipelines(seq, variants, hit);
       if (built) return built;
       // Cache present but unusable (engine changed under it) — fall through and
       // recompile if we're allowed to.
@@ -200,7 +229,11 @@ export class MaterialRuntime {
 
     if (seq === this._seq) {
       this.errors = errors;
-      if (wgsl) this.compiledWGSL = { ...this.compiledWGSL, ...wgsl, vertexLocations: vsSlang.vertexLocations };
+      // Only what this run produced: a variant that failed to build has no
+      // WGSL to save, and carrying the last good module over would hide that
+      // from the publish check, which is how a broken shader ends up on a
+      // gallery page as an empty canvas.
+      if (wgsl) this.cacheEntry = materialEntry(m, { ...wgsl, locations: vsSlang.vertexLocations }, keys);
     }
     return errors;
   }
