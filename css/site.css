@@ -703,9 +703,14 @@ a:hover { text-decoration: underline; }
   letter-spacing: 0.04em;
 }
 
-/* Unmissable on purpose: an unfinished legal page that looks finished is
-   worse than no page at all. Delete the markup with it. */
-.legal-todo {
+/* Something the reader needs to see before anything else on the page. */
+/* A particle removed under a copyright notice (docs/copyright-runbook.md).
+   Only its owner can see it, and it should not look like the rest of their
+   work while it sits there. */
+.thumb .vis-badge.removed { color: var(--danger); }
+.card:has(.vis-badge.removed) .thumb img { opacity: 0.35; filter: grayscale(1); }
+
+.alert {
   background: rgba(224, 82, 82, 0.1);
   border: 1px solid rgba(224, 82, 82, 0.45);
   border-radius: var(--radius);
@@ -713,7 +718,7 @@ a:hover { text-decoration: underline; }
   margin-bottom: 26px;
   line-height: 1.6;
 }
-.legal-todo b { color: var(--danger); }
+.alert b { color: var(--danger); }
 
 .legal-updated { margin-top: 30px; }
 

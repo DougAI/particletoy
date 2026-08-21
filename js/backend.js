@@ -394,11 +394,28 @@ export async function listParticles({ q = '', tag = '', sort = 'newest', page = 
   return rest(`particles?${p}`, { headers: { Prefer: 'count=exact' } });
 }
 
-/** All particles of one user; includePrivate only works for yourself. */
+/** All particles of one user; includePrivate only works for yourself.
+ *
+ *  takedown_at is asked for on top of CARD_COLS rather than inside it, on the
+ *  same reasoning as the preview columns in og/index.js: PostgREST fails the
+ *  whole query on one unknown column, so folding it into the shared list would
+ *  take the entire public gallery down on any project that hasn't re-run
+ *  schema.sql. Only an owner's own list can contain a removed particle — row
+ *  level security keeps them out of every public query — so only that list
+ *  asks for the column, and only that list pays if it's missing. */
 export async function listByOwner(ownerId, { includePrivate = false } = {}) {
   const vis = includePrivate ? '' : '&visibility=eq.public';
-  return rest(`particles?owner=eq.${ownerId}${vis}&select=${CARD_COLS}&order=updated_at.desc&limit=200`,
+  const ask = (cols) => rest(
+    `particles?owner=eq.${ownerId}${vis}&select=${cols}&order=updated_at.desc&limit=200`,
     { headers: { Prefer: 'count=exact' } });
+  try {
+    return await ask(`${CARD_COLS},takedown_at`);
+  } catch (e) {
+    // 42703 = undefined_column. Everything else about the list still works.
+    if (e.code !== '42703' && !/does not exist/i.test(e.message || '')) throw e;
+    console.warn('takedown_at missing — re-run supabase/schema.sql');
+    return ask(CARD_COLS);
+  }
 }
 
 export function bumpViews(id) {

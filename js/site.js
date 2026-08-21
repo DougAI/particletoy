@@ -324,8 +324,15 @@ window.addEventListener('pt:schema-missing', showSetupBanner);
 // ─── particle cards + live hover preview ────────────────────────────────────
 
 export function cardHTML(p, { showVisibility = false } = {}) {
-  const badge = showVisibility && p.visibility === 'private'
-    ? '<span class="vis-badge">private</span>' : '';
+  // `removed` isn't behind showVisibility the way `private` is: a taken-down
+  // particle can only ever appear in a list its own owner is looking at, since
+  // row level security keeps it out of every public query. Where it shows up
+  // at all, it should say so — a particle that quietly stopped being visible
+  // to anybody else is the one thing worse than one that says why.
+  const badge = p.takedown_at
+    ? '<span class="vis-badge removed">removed</span>'
+    : showVisibility && p.visibility === 'private'
+      ? '<span class="vis-badge">private</span>' : '';
   return `
   <a class="card" href="view.html?id=${p.id}" data-card-id="${p.id}">
     <div class="thumb">

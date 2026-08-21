@@ -14,20 +14,19 @@ by one.
 
 ---
 
-## 0. Decide these once
+## 0. The policy
 
-Everything else in this file is mechanical. These three numbers are judgement,
-and the only thing that matters is that they stay the same from one notice to
-the next. The values below are a starting proposal — **replace them with yours
-and delete this note.**
+Everything else in this file is mechanical. These three are judgement — and
+having been decided, the only thing that matters is that they stay the same
+from one notice to the next. Change them deliberately or not at all.
 
-| | Proposed |
+| | |
 |---|---|
-| Strikes before the account is suspended | 3 |
-| Window they're counted over | 12 months, rolling |
+| Strikes before the account is suspended | **3** |
+| Window they're counted over | **12 months, rolling** |
 | What clears a strike | a successful counter-notice, or a withdrawn notice |
 
-Two rules that aren't negotiable, whatever numbers you pick:
+Two rules that hold whatever those numbers are:
 
 - **Re-uploading material that was removed is a strike on its own**, immediately.
 - **A notice is not a strike until you decide it's a good one.** That's why
@@ -171,7 +170,12 @@ Doing all of this by hand is a perfectly reasonable implementation at this size,
 and hand-execution against a written runbook is exactly what "reasonably
 implemented" asks for. Build admin UI when the manual path starts costing
 mistakes — realistically, somewhere around the third or fourth notice, or the
-first time two arrive in a week. At that point the things worth having are
-security-definer RPCs for takedown/restore (so the steps can't be half-done) and
-a takedown badge on the owner's own particle list, which today shows a removed
-particle as though nothing happened.
+first time two arrive in a week. The thing most worth having then is a pair of
+security-definer RPCs for takedown and restore, so the steps of §2 can't be
+half-done: today nothing stops the row being flagged and the storage objects
+being left behind, which is the failure that leaves infringing material served
+from a URL while the site believes it is gone.
+
+(The owner-facing half is already built: a removed particle carries a *removed*
+badge in its owner's list and an explanation on its page, pointing at the
+counter-notice route. Nobody else can see it at all.)
