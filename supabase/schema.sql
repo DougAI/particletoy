@@ -12,6 +12,7 @@
 --   comments       flat comment threads on particles
 --   featured       curation: particle-of-the-day + featured grid (admin only)
 --   notifications  in-app "someone liked/commented" inbox
+--   copyright_notices  §512 recordkeeping: what was reported, and what was done
 --   media bucket   public storage for avatars, thumbnails + preview clips
 --   + RLS policies, counter triggers, view-count RPC, account deletion RPC
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -27,8 +28,15 @@ create table if not exists public.profiles (
   is_admin        boolean not null default false,
   notify_comments boolean not null default true,
   notify_likes    boolean not null default true,
+  -- Set when the account is terminated under the repeat-infringer policy
+  -- (docs/copyright-runbook.md). Not in the column grants below, so the
+  -- account holder cannot clear it. This is the *app-level* half of a
+  -- termination: it stops them publishing. Stopping them signing in at all
+  -- is a separate lever — ban the user in Supabase → Authentication.
+  suspended_at    timestamptz,
   created_at      timestamptz not null default now()
 );
+alter table public.profiles add column if not exists suspended_at timestamptz;
 
 -- ── 2. particles ───────────────────────────────────────────────────────────
 create table if not exists public.particles (
@@ -49,6 +57,14 @@ create table if not exists public.particles (
   preview_w     integer,
   preview_h     integer,
   visibility    text not null default 'public' check (visibility in ('public', 'private')),
+  -- Removed in response to a copyright notice. Deliberately NOT part of
+  -- `visibility`: that column is owner-writable (see the grants below), so a
+  -- takedown expressed as visibility='private' is one the infringer can undo
+  -- by flipping it back. These two are in no grant at all, which means no
+  -- client can write them — a takedown is a service-role operation, run from
+  -- the SQL editor against docs/copyright-runbook.md.
+  takedown_at   timestamptz,
+  takedown_ref  text,
   views         integer not null default 0,
   likes         integer not null default 0,
   comment_count integer not null default 0,
@@ -62,6 +78,8 @@ alter table public.particles add column if not exists preview_url  text;
 alter table public.particles add column if not exists preview_type text;
 alter table public.particles add column if not exists preview_w    integer;
 alter table public.particles add column if not exists preview_h    integer;
+alter table public.particles add column if not exists takedown_at  timestamptz;
+alter table public.particles add column if not exists takedown_ref text;
 do $$ begin
   alter table public.particles add constraint particles_preview_type_check
     check (preview_type is null or
@@ -115,6 +133,44 @@ create table if not exists public.notifications (
 create index if not exists notifications_user_idx on public.notifications (user_id, read, created_at desc);
 
 
+-- ── 7. copyright notices (§512 recordkeeping) ──────────────────────────────
+-- The evidence that the repeat-infringer policy published on dmca.html is
+-- more than words. §512(i) conditions the safe harbor on that policy being
+-- *reasonably implemented*, which in practice means notices are counted
+-- against accounts and acted on consistently — so they have to be written
+-- down somewhere that outlives the material.
+--
+-- Which is why owner_id, the username and the title are copied in rather than
+-- left to a join: the whole point of the row is to still say who did what
+-- after the particle, and possibly the account, is gone.
+--
+-- Nothing in the app reads or writes this. Rows go in from the SQL editor,
+-- following docs/copyright-runbook.md.
+create table if not exists public.copyright_notices (
+  id               uuid primary key default gen_random_uuid(),
+  received_at      timestamptz not null default now(),
+  kind             text not null default 'notice'
+                   check (kind in ('notice', 'counter')),
+  particle_id      uuid references public.particles(id) on delete set null,
+  particle_title   text not null default '',
+  owner_id         uuid references public.profiles(id) on delete set null,
+  owner_username   text not null default '',
+  claimant         text not null default '',
+  claimant_contact text not null default '',
+  outcome          text not null default 'received'
+                   check (outcome in ('received', 'removed', 'rejected',
+                                      'withdrawn', 'restored')),
+  -- Off by default on purpose. A notice arriving is not a finding; it becomes
+  -- a strike when you decide it was a good one. Auto-striking on receipt is
+  -- how a takedown-notice cannon turns into an account termination.
+  counts_as_strike boolean not null default false,
+  actioned_at      timestamptz,
+  notes            text not null default ''
+);
+create index if not exists copyright_notices_owner_idx
+  on public.copyright_notices (owner_id, received_at desc);
+
+
 -- ═══ Row Level Security ═════════════════════════════════════════════════════
 alter table public.profiles      enable row level security;
 alter table public.particles     enable row level security;
@@ -122,6 +178,7 @@ alter table public.likes         enable row level security;
 alter table public.comments      enable row level security;
 alter table public.featured      enable row level security;
 alter table public.notifications enable row level security;
+alter table public.copyright_notices enable row level security;
 
 -- profiles: everyone can read, you can only touch your own
 drop policy if exists "profiles read"   on public.profiles;
@@ -131,14 +188,23 @@ create policy "profiles read"   on public.profiles for select using (true);
 create policy "profiles insert" on public.profiles for insert with check (id = auth.uid());
 create policy "profiles update" on public.profiles for update using (id = auth.uid());
 
--- particles: public ones are visible to all, private only to their owner
+-- particles: public ones are visible to all, private only to their owner.
+-- A taken-down particle stops being public but stays visible to its owner —
+-- they are entitled to see what was removed, and the counter-notice route on
+-- dmca.html is worth nothing if the material silently ceases to exist for
+-- them too.
 drop policy if exists "particles read"   on public.particles;
 drop policy if exists "particles insert" on public.particles;
 drop policy if exists "particles update" on public.particles;
 drop policy if exists "particles delete" on public.particles;
 create policy "particles read"   on public.particles for select
-  using (visibility = 'public' or owner = auth.uid());
-create policy "particles insert" on public.particles for insert with check (owner = auth.uid());
+  using ((visibility = 'public' and takedown_at is null) or owner = auth.uid());
+create policy "particles insert" on public.particles for insert with check (
+  owner = auth.uid() and not exists (
+    select 1 from public.profiles pr
+    where pr.id = auth.uid() and pr.suspended_at is not null
+  )
+);
 create policy "particles update" on public.particles for update using (owner = auth.uid());
 create policy "particles delete" on public.particles for delete using (owner = auth.uid());
 
@@ -151,7 +217,8 @@ create policy "likes read"   on public.likes for select using (true);
 create policy "likes insert" on public.likes for insert with check (
   user_id = auth.uid() and exists (
     select 1 from public.particles p
-    where p.id = particle_id and (p.visibility = 'public' or p.owner = auth.uid())
+    where p.id = particle_id
+      and ((p.visibility = 'public' and p.takedown_at is null) or p.owner = auth.uid())
   )
 );
 create policy "likes delete" on public.likes for delete using (user_id = auth.uid());
@@ -163,12 +230,17 @@ drop policy if exists "comments insert" on public.comments;
 drop policy if exists "comments delete" on public.comments;
 create policy "comments read" on public.comments for select using (
   exists (select 1 from public.particles p
-          where p.id = particle_id and (p.visibility = 'public' or p.owner = auth.uid()))
+          where p.id = particle_id
+            and ((p.visibility = 'public' and p.takedown_at is null) or p.owner = auth.uid()))
 );
 create policy "comments insert" on public.comments for insert with check (
   user_id = auth.uid() and exists (
     select 1 from public.particles p
-    where p.id = particle_id and (p.visibility = 'public' or p.owner = auth.uid())
+    where p.id = particle_id
+      and ((p.visibility = 'public' and p.takedown_at is null) or p.owner = auth.uid())
+  ) and not exists (
+    select 1 from public.profiles pr
+    where pr.id = auth.uid() and pr.suspended_at is not null
   )
 );
 create policy "comments delete" on public.comments for delete using (
@@ -184,6 +256,13 @@ create policy "featured read"  on public.featured for select using (true);
 create policy "featured write" on public.featured for all
   using      (exists (select 1 from public.profiles pr where pr.id = auth.uid() and pr.is_admin))
   with check (exists (select 1 from public.profiles pr where pr.id = auth.uid() and pr.is_admin));
+
+-- copyright notices: admins may read them; nobody writes through the API at
+-- all (see the revoke below). Service role only, which is what the SQL editor
+-- runs as.
+drop policy if exists "copyright notices read" on public.copyright_notices;
+create policy "copyright notices read" on public.copyright_notices for select
+  using (exists (select 1 from public.profiles pr where pr.id = auth.uid() and pr.is_admin));
 
 -- notifications: your own inbox only (rows are inserted by triggers)
 drop policy if exists "notifications read"   on public.notifications;
@@ -202,6 +281,7 @@ revoke insert, update on public.particles     from anon, authenticated;
 revoke insert, update on public.likes         from anon, authenticated;
 revoke insert, update on public.comments      from anon, authenticated;
 revoke insert, update on public.notifications from anon, authenticated;
+revoke insert, update, delete on public.copyright_notices from anon, authenticated;
 
 grant insert (id, username, display_name, avatar_url, bio)
   on public.profiles to authenticated;
@@ -211,6 +291,10 @@ grant update (display_name, avatar_url, bio, notify_comments, notify_likes)
 grant insert (title, description, tags, data, visibility, thumb_url,
               preview_url, preview_type, preview_w, preview_h)
   on public.particles to authenticated;
+-- takedown_at / takedown_ref are missing from both lists on purpose, as is
+-- profiles.suspended_at: a moderation flag the moderated party can clear is
+-- not a moderation flag. Column grants are explicit here, so a new column is
+-- unwritable by clients until somebody names it — leave these unnamed.
 grant update (title, description, tags, data, visibility, thumb_url,
               preview_url, preview_type, preview_w, preview_h)
   on public.particles to authenticated;

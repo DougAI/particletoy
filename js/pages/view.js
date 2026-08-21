@@ -55,8 +55,20 @@ function render() {
     ? `user.html?u=${encodeURIComponent(row.author.username)}` : null;
   const edited = new Date(row.updated_at) - new Date(row.created_at) > 60000;
 
+  // Not gated on isOwner: row level security means nobody else can load this
+  // row at all, so if it is on screen the reader is entitled to the reason.
+  const removed = row.takedown_at ? `
+    <div class="alert">
+      <b>Removed following a copyright notice.</b>
+      Nobody else can see this particle${row.takedown_ref
+        ? ` (reference ${esc(row.takedown_ref)})` : ''}.
+      If you believe it was removed by mistake or misidentification, the
+      counter-notice route is on the <a href="dmca.html">copyright page</a>.
+    </div>` : '';
+
   document.title = `${row.title} — particletoy`;
   page.innerHTML = `
+    ${removed}
     <div class="player-frame" id="player-frame"></div>
     <div class="player-bar">
       <button class="btn small" id="pl-toggle" title="Play/Pause">⏸</button>

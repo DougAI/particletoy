@@ -9,10 +9,10 @@
      crawlers don't run JavaScript and don't reliably resolve relative URLs. -->
 <meta property="og:site_name" content="particletoy">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://dougai.github.io/particletoy/setup.html">
+<meta property="og:url" content="https://particletoy.com/setup.html">
 <meta property="og:title" content="particletoy — self-hosting guide">
 <meta property="og:description" content="Run particletoy yourself: static hosting plus a free Supabase project for accounts, the gallery and link previews.">
-<meta property="og:image" content="https://dougai.github.io/particletoy/img/og-card.jpg">
+<meta property="og:image" content="https://particletoy.com/img/og-card.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
@@ -384,6 +384,8 @@ Supabase
   │                    views/likes/comment_count (trigger-maintained)
   │    likes, comments counters + in-app notifications via triggers
   │    featured        POTD + featured grid (admin-only writes)
+  │    copyright_notices  §512 recordkeeping — service-role writes only,
+  │                    see docs/copyright-runbook.md
   ├─ Storage           /media/&lt;uid&gt;/avatar.jpg, /media/&lt;uid&gt;/thumbs/&lt;id&gt;.jpg,
   │                    /media/&lt;uid&gt;/previews/&lt;id&gt;.mp4
   └─ (storage is also where preview clips live)
