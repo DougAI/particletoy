@@ -420,6 +420,7 @@ function renderFooter() {
   f.innerHTML = `
     <span>particle<b style="color:var(--accent)">toy</b> — build, explore &amp; share particle effects</span>
     <a href="setup.html">self-hosting guide</a>
+    <a href="dmca.html">copyright</a>
     ${linkReady(LINKS.github) ? `<a href="${esc(LINKS.github)}">source</a>` : ''}
     <span style="flex:1"></span>
     ${linkReady(LINKS.paypal) ? `<a href="${esc(LINKS.paypal)}">donate</a>` : ''}
