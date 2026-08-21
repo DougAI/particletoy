@@ -51,7 +51,7 @@
 // host's dashboard to override without editing the file.
 const SUPABASE_URL = 'https://kqbbghyfpxxowwhdtjnj.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_JsVww6ububer-Yi-s0AG4A_0Di7CjOh';
-const SITE_URL = 'https://dougai.github.io/particletoy';
+const SITE_URL = 'https://particletoy.com';
 // ────────────────────────────────────────────────────────────────────────────
 
 const BRAND_COLOR = '#e8a33d';          // Discord paints the embed's edge with it

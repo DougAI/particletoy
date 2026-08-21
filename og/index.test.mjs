@@ -47,7 +47,7 @@ assert(typeof mod.fetch === 'function', 'no default { fetch } export for Workers
 const call = (url, ua) =>
   handle(new Request(url, { headers: ua ? { 'user-agent': ua } : {} }), ENV);
 
-const SITE = 'https://dougai.github.io/particletoy';
+const SITE = 'https://particletoy.com';
 // Where the endpoint itself answers — what a reader pastes, and so what the
 // card has to call itself.
 const OG = 'https://proj.supabase.co/og';
