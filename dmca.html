@@ -16,13 +16,17 @@
      safe harbor with it, silently, with no reminder from anyone. Resubmit at
      https://dmca.copyright.gov before then ($6).
 
-     Still outstanding, neither of them fixable in HTML:
-       · §512(i) needs the repeat-infringer policy below to be *reasonably
-         implemented*, not just published — notices have to be tracked
-         against accounts and acted on. Publishing it is the easy half.
-       · There is no general contact route on the site yet, so this page
-         deliberately says nothing about non-copyright complaints. Add a
-         section here once there is somewhere to send them.
+     The other half of §512(i) — the policy below being *reasonably
+     implemented* rather than merely published — lives in
+     docs/copyright-runbook.md, with the schema behind it in
+     supabase/schema.sql (particles.takedown_at, copyright_notices,
+     profiles.suspended_at). Publishing the policy is the easy half; if the
+     runbook stops being followed, this paragraph becomes a liability rather
+     than a defence.
+
+     Still outstanding: there is no general contact route on the site, so
+     this page deliberately says nothing about non-copyright complaints. Add
+     a section here once there is somewhere to send them.
 
      The notice and counter-notice checklists are the statutory elements of
      17 U.S.C. §512(c)(3)(A) and §512(g)(3) restated in plain English.
@@ -147,12 +151,10 @@
   <!-- §512(i) conditions the safe harbor on adopting a termination policy,
        reasonably implementing it, and informing users of it. This section is
        the informing; the general wording below is the form most platforms
-       use and the courts have not required thresholds to be published. What
-       they do require is that it be real — so notices have to be counted
-       against accounts and acted on, and the internal rule (how many, over
-       what window, what a successful counter-notice undoes) written down
-       somewhere even if it isn't published here. Mirror it in the Terms of
-       Service when those exist. -->
+       use, and the courts have not required thresholds to be published. The
+       thresholds themselves, and the steps that apply them, are in
+       docs/copyright-runbook.md. Mirror them in the Terms of Service when
+       those exist. -->
   <p>
     It is our policy to terminate, in appropriate circumstances, the accounts of
     users who repeatedly infringe the copyright of others. We take account of
