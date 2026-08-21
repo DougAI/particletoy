@@ -22,19 +22,46 @@ import {
 
 const canvas = document.getElementById('gl');
 const { device, context, format, error: gpuError } = await createGPU(canvas);
-if (!device) {
+
+/**
+ * No device — no picture. Everything that is pure state still works, though:
+ * the inspector, the shader source, Share / Save / Export / Import. So the
+ * editor opens anyway, minus the viewport, and says what is missing and how to
+ * get it. Throwing here instead left a dead toolbar and an empty inspector on
+ * an unsupported browser, and gave an automated run nothing to read but a
+ * stack trace.
+ *
+ * The stand-in renderer covers the two things the editor touches outside the
+ * frame loop (the WGSL cache handed over on load, and the sim-compile hook);
+ * the loop itself never starts.
+ */
+function showGpuError(reason) {
   const e = document.getElementById('gl-error');
   e.classList.remove('hidden');
-  e.textContent = gpuError;
-  throw new Error(gpuError);
+  const box = document.createElement('div');
+  box.innerHTML = `<p><b>${reason}</b></p>
+    <p class="muted">particletoy renders with WebGPU — a current Chrome, Edge, Safari or Firefox.
+    Headless automation needs it switched on explicitly:
+    <code>--enable-unsafe-webgpu --use-angle=swiftshader</code>.</p>
+    <p class="muted">The rest of the editor still works: emitters, materials, curves and shader
+    source are all editable, and Share / Save / Export carry them out intact.
+    <a href="setup.html">Setup guide ↗</a></p>`;
+  e.appendChild(box);
+  document.getElementById('stats').textContent = 'not rendering — no WebGPU';
 }
 
-const renderer = new Renderer({ device, context, format, canvas });
+const renderer = device
+  ? new Renderer({ device, context, format, canvas })
+  : { wgslCache: null, onSimCompiled: null };
+if (!device) showGpuError(gpuError);
 const camera = new OrbitCamera(canvas);
 
 // ---------------------------------------------------------------- app state
 const app = {
   name: 'Untitled',
+  // Read by the shader panel: without a device nothing can compile, and
+  // "loading the Slang compiler…" would sit there forever saying otherwise.
+  hasGPU: Boolean(device),
   emitters: [],
   materials: [],
   scene: defaultScene(),
@@ -102,7 +129,9 @@ const app = {
     editorPanel.refreshMaterials();
   },
 };
-window.__particletoy = { app, renderer, device, canvas }; // for curious consoles
+// For curious consoles — and for anything driving the editor from the outside,
+// which needs a way to tell "still starting up" from "this browser can't render".
+window.__particletoy = { app, renderer, device, canvas, gpuError: gpuError ?? null };
 
 // Cloud state: set when the effect was loaded from (or published to) the
 // community gallery, so Publish knows whether to update-in-place or create.
@@ -215,6 +244,9 @@ const nextTick = () => Promise.race([
  * caller reports as the gap it is rather than blocking the save forever.
  */
 async function settleCompiles(timeoutMs = 30000) {
+  // Nothing compiles without a device, and the materials never pick up
+  // runtimes — so the loop below would spin until its deadline for nothing.
+  if (!device) return false;
   const deadline = performance.now() + timeoutMs;
   for (;;) {
     const jobs = [];
@@ -1001,6 +1033,19 @@ async function boot() {
 
   updatePublishButton();
   window.addEventListener('pt:auth', updatePublishButton);
+  if (!device) {
+    // Playback, the pipeline switches and anything that captures the canvas
+    // have nothing to act on. Disabled says so; live buttons that quietly do
+    // nothing read as a broken page.
+    for (const gid of ['btn-play', 'btn-restart', 'speed-select', 'pipe-deferred',
+      'pipe-forward', 'debug-select', 'btn-cam-reset', 'btn-export-media', 'btn-publish']) {
+      const c = document.getElementById(gid);
+      if (!c) continue;
+      c.disabled = true;
+      c.title = 'Needs WebGPU — this browser can’t render the effect';
+    }
+    return;
+  }
   requestAnimationFrame((t) => { last = t; tick(t); });
 }
 

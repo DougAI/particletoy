@@ -75,6 +75,12 @@ export class CodeEditor {
     });
   }
 
+  /** Names the textarea for screen readers and for anything driving the page
+   *  by role — "Flame fragment shader", not "an unlabelled text box". */
+  setLabel(text) {
+    this.ta.setAttribute('aria-label', text);
+  }
+
   _insert(text) {
     const ta = this.ta;
     const s = ta.selectionStart;

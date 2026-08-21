@@ -43,13 +43,44 @@ function el(tag, cls, text) {
   return e;
 }
 
+let ctlSeq = 0;
+
+/**
+ * Rows carry their label as loose text next to the controls, which leaves the
+ * controls themselves nameless — to a screen reader, and to anything driving
+ * the page from the accessibility tree, a spinner next to "Rate (/s)" is just
+ * "a spinner". So the row hands its own text out:
+ *
+ *   - the first control is wired to the <label> with for/id, which also makes
+ *     clicking the label focus it;
+ *   - a control carrying data-part is one of several in the row (vec3 axes,
+ *     range ends, a slider's exact-value box), and gets "<label> <part>" so
+ *     the three boxes under "Position" aren't three identical names;
+ *   - anything that already names itself — a title, an aria-label set by the
+ *     widget that built it — is left exactly as it is.
+ *
+ * `label` may be {text, name} where the accessible name should say more than
+ * the visible text: four point lights each show "Position", and only the name
+ * can say which light it belongs to.
+ */
 function row(label, ...controls) {
+  const text = typeof label === 'string' ? label : label.text;
+  const name = typeof label === 'string' ? label : (label.name || label.text);
   const r = el('div', 'prop-row');
-  const l = el('label', 'prop-label', label);
+  const l = el('label', 'prop-label', text);
   r.appendChild(l);
   const c = el('div', 'prop-controls');
   for (const ctl of controls) c.appendChild(ctl);
   r.appendChild(c);
+  for (const ctl of c.querySelectorAll('input, select, textarea')) {
+    if (ctl.getAttribute('aria-label') || ctl.title) continue; // names itself
+    if (!l.htmlFor) {
+      ctl.id ||= `pt-ctl-${++ctlSeq}`;
+      l.htmlFor = ctl.id;
+      if (name === text && !ctl.dataset.part) continue; // the <label> is its name
+    }
+    ctl.setAttribute('aria-label', ctl.dataset.part ? `${name} ${ctl.dataset.part}` : name);
+  }
   return r;
 }
 
@@ -85,6 +116,7 @@ function slider(v, onCh, { min = 0, max = 1, step = 0.01 } = {}) {
   s.type = 'range';
   s.min = min; s.max = max; s.step = step; s.value = v;
   const n = numIn(v, (x) => { s.value = x; onCh(x); }, { step, min, max, w: 52 });
+  n.dataset.part = 'value'; // the slider keeps the plain name; this is the exact box
   s.addEventListener('input', () => { n.value = s.value; recordChange(s); onCh(parseFloat(s.value)); });
   wrap.append(s, n);
   return wrap;
@@ -93,16 +125,20 @@ function slider(v, onCh, { min = 0, max = 1, step = 0.01 } = {}) {
 function vec3In(arr, onCh, opts = {}) {
   const wrap = el('div', 'vec-wrap');
   for (let i = 0; i < 3; i++) {
-    wrap.appendChild(numIn(arr[i], (x) => { arr[i] = x; onCh(); }, { step: 0.1, w: 52, ...opts }));
+    const n = numIn(arr[i], (x) => { arr[i] = x; onCh(); }, { step: 0.1, w: 52, ...opts });
+    n.dataset.part = 'XYZ'[i];
+    wrap.appendChild(n);
   }
   return wrap;
 }
 
 function range2In(arr, onCh, opts = {}) {
   const wrap = el('div', 'vec-wrap');
-  wrap.appendChild(numIn(arr[0], (x) => { arr[0] = x; onCh(); }, { step: 0.1, w: 60, ...opts }));
-  wrap.appendChild(el('span', 'range-sep', '–'));
-  wrap.appendChild(numIn(arr[1], (x) => { arr[1] = x; onCh(); }, { step: 0.1, w: 60, ...opts }));
+  const lo = numIn(arr[0], (x) => { arr[0] = x; onCh(); }, { step: 0.1, w: 60, ...opts });
+  const hi = numIn(arr[1], (x) => { arr[1] = x; onCh(); }, { step: 0.1, w: 60, ...opts });
+  lo.dataset.part = 'min';
+  hi.dataset.part = 'max';
+  wrap.append(lo, el('span', 'range-sep', '–'), hi);
   return wrap;
 }
 
@@ -141,14 +177,18 @@ function colorIn(arr, onCh) {
 
 function colorRGBAIn(arr, onCh) {
   const wrap = el('div', 'vec-wrap');
-  wrap.appendChild(colorIn(arr, onCh));
-  wrap.appendChild(numIn(arr[3], (x) => { arr[3] = x; onCh(); }, { step: 0.05, min: 0, max: 1, w: 48 }));
+  const a = numIn(arr[3], (x) => { arr[3] = x; onCh(); }, { step: 0.05, min: 0, max: 1, w: 48 });
+  a.dataset.part = 'alpha';
+  wrap.append(colorIn(arr, onCh), a);
   return wrap;
 }
 
-function btn(label, onClick, cls = 'btn') {
+/** `name` names an icon-only button ("✕" says nothing to a screen reader, and
+ *  a page full of them says it several times over). */
+function btn(label, onClick, cls = 'btn', name) {
   const b = el('button', cls, label);
   b.type = 'button';
+  if (name) b.setAttribute('aria-label', name);
   // Recorded unconditionally — History.flush() drops the entry if the click
   // (e.g. closing a modal) turned out not to change app state.
   b.addEventListener('click', () => { recordChange(b); onClick(); });
@@ -211,7 +251,7 @@ export function buildInspector(app) {
   app.emitters.forEach((em, i) => {
     const item = el('div', 'emitter-item' + (i === app.selEmitter ? ' selected' : ''));
     const cb = check(em.p.enabled, (v) => { em.p.enabled = v; });
-    cb.title = 'enabled';
+    cb.title = `${em.p.name} enabled`;
     item.appendChild(cb);
     const name = el('span', 'emitter-name', em.p.name);
     name.addEventListener('click', () => app.selectEmitter(i));
@@ -252,7 +292,7 @@ function buildEmitterSections(root, app, em) {
     const nameIn = el('input', 'text-in');
     nameIn.value = p.name;
     nameIn.addEventListener('change', () => { recordChange(nameIn); p.name = nameIn.value || 'Emitter'; buildInspector(app); });
-    g.appendChild(row('Name', nameIn));
+    g.appendChild(row('Emitter name', nameIn));
     g.appendChild(row('Position', vec3In(p.position, () => {})));
     g.appendChild(row('Duration (s)', numIn(p.duration, (x) => { p.duration = Math.max(0.05, x); }, { min: 0.05, step: 0.5 })));
     g.appendChild(row('Looping', check(p.looping, (v) => { p.looping = v; })));
@@ -295,16 +335,19 @@ function buildEmitterSections(root, app, em) {
           app.markSim(em);
           buildInspector(app);
         });
+        nameIn.setAttribute('aria-label', `Field ${fi + 1} name`);
         r.appendChild(nameIn);
-        r.appendChild(selectIn(FIELD_TYPES.map((t) => [t, t]), f.type, (v) => {
+        const typeIn = selectIn(FIELD_TYPES.map((t) => [t, t]), f.type, (v) => {
           f.type = v;
           app.markSim(em);
-        }));
+        });
+        typeIn.setAttribute('aria-label', `Field ${fi + 1} type`);
+        r.appendChild(typeIn);
         r.appendChild(btn('✕', () => {
           p.fields.splice(fi, 1);
           app.markSim(em);
           buildInspector(app);
-        }, 'btn btn-icon'));
+        }, 'btn btn-icon', `Remove field ${fi + 1}`));
         fl.appendChild(r);
       });
       sim.appendChild(row('Fields', fl));
@@ -332,11 +375,16 @@ function buildEmitterSections(root, app, em) {
     const bl = el('div', 'burst-list');
     p.spawn.bursts.forEach((b, bi) => {
       const r = el('div', 'burst-row');
+      const timeIn = numIn(b.time, (x) => { b.time = Math.max(0, x); }, { min: 0, step: 0.1, w: 56 });
+      const countIn = numIn(b.count, (x) => { b.count = Math.max(1, Math.round(x)); }, { min: 1, step: 10, w: 56 });
+      timeIn.setAttribute('aria-label', `Burst ${bi + 1} time`);
+      countIn.setAttribute('aria-label', `Burst ${bi + 1} count`);
       r.appendChild(el('span', 'burst-label', 't='));
-      r.appendChild(numIn(b.time, (x) => { b.time = Math.max(0, x); }, { min: 0, step: 0.1, w: 56 }));
+      r.appendChild(timeIn);
       r.appendChild(el('span', 'burst-label', 'count'));
-      r.appendChild(numIn(b.count, (x) => { b.count = Math.max(1, Math.round(x)); }, { min: 1, step: 10, w: 56 }));
-      r.appendChild(btn('✕', () => { p.spawn.bursts.splice(bi, 1); buildInspector(app); }, 'btn btn-icon'));
+      r.appendChild(countIn);
+      r.appendChild(btn('✕', () => { p.spawn.bursts.splice(bi, 1); buildInspector(app); },
+        'btn btn-icon', `Remove burst ${bi + 1}`));
       bl.appendChild(r);
     });
     sp.appendChild(row('Bursts', bl));
@@ -373,7 +421,7 @@ function buildEmitterSections(root, app, em) {
     // Must dirty the LUT: the CPU sim reads this curve object directly every
     // frame, but a compute sim samples the baked texture — without this, edits
     // are invisible in shader mode until some other curve triggers a re-bake.
-    new CurveEditor(cw, { curve: p.speedOverLife, vMin: 0, vMax: 2, onChange: lut });
+    new CurveEditor(cw, { curve: p.speedOverLife, vMin: 0, vMax: 2, onChange: lut, name: 'Speed / life' });
     mo.appendChild(row('Speed / life', cw));
   }
 
@@ -382,7 +430,7 @@ function buildEmitterSections(root, app, em) {
   {
     sr.appendChild(row('Start size', range2In(p.sizeStart, () => {}, { min: 0.001 })));
     const cw = el('div', 'curve-holder');
-    new CurveEditor(cw, { curve: p.sizeOverLife, vMin: 0, vMax: 3, onChange: lut });
+    new CurveEditor(cw, { curve: p.sizeOverLife, vMin: 0, vMax: 3, onChange: lut, name: 'Size / life' });
     sr.appendChild(row('Size / life', cw));
     sr.appendChild(row('Start rot°', range2In(p.rotationStart, () => {}, { step: 15 })));
     sr.appendChild(row('Rot speed°/s', range2In(p.rotationSpeed, () => {}, { step: 15 })));
@@ -394,10 +442,10 @@ function buildEmitterSections(root, app, em) {
     co.appendChild(row('Start color A', colorRGBAIn(p.colorStartA, () => {})));
     co.appendChild(row('Start color B', colorRGBAIn(p.colorStartB, () => {})));
     const gw = el('div', 'curve-holder');
-    new GradientEditor(gw, { gradient: p.colorOverLife, onChange: lut });
+    new GradientEditor(gw, { gradient: p.colorOverLife, onChange: lut, name: 'Color / life' });
     co.appendChild(row('Color / life', gw));
     const aw = el('div', 'curve-holder');
-    new CurveEditor(aw, { curve: p.alphaOverLife, vMin: 0, vMax: 1, onChange: lut });
+    new CurveEditor(aw, { curve: p.alphaOverLife, vMin: 0, vMax: 1, onChange: lut, name: 'Alpha / life' });
     co.appendChild(row('Alpha / life', aw));
   }
 
@@ -428,27 +476,32 @@ function buildMaterialSections(root, app) {
     const box = el('div', 'material-box');
     const head = el('div', 'material-head');
     head.appendChild(el('span', 'material-name', m.name));
-    head.appendChild(btn('Edit shaders ▸', () => app.openMaterialInEditor(m.id), 'btn btn-small'));
+    head.appendChild(btn('Edit shaders ▸', () => app.openMaterialInEditor(m.id), 'btn btn-small',
+      `Edit shaders — ${m.name}`));
     box.appendChild(head);
 
     const nameIn = el('input', 'text-in');
     nameIn.value = m.name;
     nameIn.addEventListener('change', () => { recordChange(nameIn); m.name = nameIn.value || 'Material'; app.refreshUI(); });
-    box.appendChild(row('Name', nameIn));
-    box.appendChild(row('Blend', selectIn(
+    // Every material shows the same six labels, so the name each control
+    // answers to has to carry the material's own name.
+    const of = (text) => ({ text, name: `${m.name} ${text.toLowerCase()}` });
+    box.appendChild(row({ text: 'Material name', name: `${m.name} material name` }, nameIn));
+    box.appendChild(row(of('Blend'), selectIn(
       [['opaque', 'Opaque'], ['cutout', 'Cutout'], ['blend', 'Alpha Blend'], ['add', 'Additive']],
       m.blendMode, (v) => { m.blendMode = v; app.markMaterial(m.id); },
     )));
-    box.appendChild(row('Lit (PBR)', check(m.lit, (v) => { m.lit = v; app.markMaterial(m.id); })));
-    box.appendChild(row('Double-sided', check(m.doubleSided, (v) => { m.doubleSided = v; })));
-    box.appendChild(row('Soft particles', check(m.softParticles, (v) => { m.softParticles = v; app.markMaterial(m.id); })));
+    box.appendChild(row(of('Lit (PBR)'), check(m.lit, (v) => { m.lit = v; app.markMaterial(m.id); })));
+    box.appendChild(row(of('Double-sided'), check(m.doubleSided, (v) => { m.doubleSided = v; })));
+    box.appendChild(row(of('Soft particles'), check(m.softParticles, (v) => { m.softParticles = v; app.markMaterial(m.id); })));
     if (m.softParticles) {
-      box.appendChild(row('Soft distance', numIn(m.softDistance, (x) => { m.softDistance = Math.max(0.01, x); }, { min: 0.01, step: 0.1 })));
+      box.appendChild(row(of('Soft distance'), numIn(m.softDistance, (x) => { m.softDistance = Math.max(0.01, x); }, { min: 0.01, step: 0.1 })));
     }
     if (m.blendMode === 'cutout') {
-      box.appendChild(row('Alpha cutoff', slider(m.alphaCutoff, (x) => { m.alphaCutoff = x; })));
+      box.appendChild(row(of('Alpha cutoff'), slider(m.alphaCutoff, (x) => { m.alphaCutoff = x; })));
     }
-    box.appendChild(btn('Delete material', () => app.removeMaterial(m.id), 'btn btn-small btn-danger'));
+    box.appendChild(btn('Delete material', () => app.removeMaterial(m.id), 'btn btn-small btn-danger',
+      `Delete material — ${m.name}`));
     mb.appendChild(box);
   }
   mb.appendChild(btn('+ New material', () => {
@@ -469,10 +522,13 @@ function buildSceneSection(root, app) {
   sc.appendChild(row('Sky bottom', colorIn(s.skyBottom, () => {})));
   s.pointLights.forEach((l, i) => {
     const box = el('div', 'material-box');
-    box.appendChild(row(`Point light ${i + 1}`, check(l.enabled, (v) => { l.enabled = v; })));
-    box.appendChild(row('Position', vec3In(l.pos, () => {})));
-    box.appendChild(row('Color', colorIn(l.color, () => {})));
-    box.appendChild(row('Intensity', slider(l.intensity, (x) => { l.intensity = x; }, { min: 0, max: 12, step: 0.1 })));
+    box.appendChild(row({ text: `Point light ${i + 1}`, name: `Point light ${i + 1} enabled` },
+      check(l.enabled, (v) => { l.enabled = v; })));
+    const light = `Point light ${i + 1}`;
+    box.appendChild(row({ text: 'Position', name: `${light} position` }, vec3In(l.pos, () => {})));
+    box.appendChild(row({ text: 'Color', name: `${light} color` }, colorIn(l.color, () => {})));
+    box.appendChild(row({ text: 'Intensity', name: `${light} intensity` },
+      slider(l.intensity, (x) => { l.intensity = x; }, { min: 0, max: 12, step: 0.1 })));
     sc.appendChild(box);
   });
   sc.appendChild(row('Floor', check(s.showFloor, (v) => { s.showFloor = v; })));
@@ -511,6 +567,7 @@ export class EditorPanel {
     t.innerHTML = '';
     this.matSelect = selectIn(this.app.materials.map((m) => [m.id, m.name]), this.materialId ?? '', (v) => this.show(v, this.tab));
     this.matSelect.classList.add('editor-mat-select');
+    this.matSelect.setAttribute('aria-label', 'Material to edit');
     t.appendChild(this.matSelect);
 
     this.tabVS = btn('Vertex', () => this.show(this.materialId, 'vs'), 'btn tab-btn');
@@ -527,7 +584,7 @@ export class EditorPanel {
     autoLabel.append(autoCb, document.createTextNode(' auto'));
     t.appendChild(autoLabel);
     t.appendChild(btn('▶ Compile', () => this.commit(), 'btn btn-accent'));
-    t.appendChild(btn('?', () => showHelp(), 'btn btn-icon'));
+    t.appendChild(btn('?', () => showHelp(), 'btn btn-icon', 'Shader API help (editor panel)'));
   }
 
   refreshMaterials() {
@@ -584,6 +641,11 @@ export class EditorPanel {
   _load(target, src) {
     this.buf = target ? { ...target, src: src ?? '' } : null;
     this.editor.setValue(src);
+    const stage = this.tab === 'vs' ? 'vertex' : this.tab === 'sim' ? 'sim' : 'fragment';
+    const owner = this.tab === 'sim'
+      ? this.app.emitters[this.app.selEmitter]?.p.name
+      : this.app.materials.find((m) => m.id === this.materialId)?.name;
+    this.editor.setLabel(`${owner ? `${owner} ` : ''}${stage} shader source`);
   }
 
   _scheduleApply() {
@@ -641,6 +703,9 @@ export class EditorPanel {
    * after the compiler is ready but nothing has recompiled yet.
    */
   _warmCompiler() {
+    // Nothing to compile for without a device — and the compiler is a 24 MB
+    // fetch, which is a lot to spend on a browser that can't draw the result.
+    if (this.app.hasGPU === false) return;
     if (slangReady() || this._warming) return;
     this._warming = true;
     loadSlang()
@@ -655,6 +720,12 @@ export class EditorPanel {
     this.errorsEl.innerHTML = '';
     this.errorsEl.dataset.state = '';
     if (!errors.length) {
+      if (this.app.hasGPU === false) {
+        this.errorsEl.appendChild(el('div', 'compile-err',
+          'Shaders can\u2019t compile without WebGPU. The source is still editable, '
+          + 'and Share / Save / Export carry it with the effect.'));
+        return;
+      }
       // Before the compiler lands nothing has been compiled yet, so "✓ compiled"
       // would be a lie — and a silent several-second wait looks like a hang.
       if (!slangReady()) {

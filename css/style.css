@@ -137,6 +137,11 @@ html, body {
 .btn-small { padding: 3px 8px; font-size: 11px; }
 .btn-danger { color: var(--danger); }
 .btn-row { display: flex; gap: 6px; margin-top: 8px; }
+/* Disabled controls: the debug view outside the deferred pipeline, and
+   everything that needs a GPU on a browser that hasn't got one. Without this
+   they look live and simply refuse to work. */
+.btn:disabled, .seg-btn:disabled, .select-in:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:disabled:hover { border-color: var(--border); background: var(--panel-2); }
 
 /* ---------------------------------------------------------------- inputs */
 .text-in, .num-in, .select-in, .obj-in {

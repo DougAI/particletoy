@@ -24,9 +24,13 @@ function hexToLin(hex) {
 export { linToHex, hexToLin };
 
 export class CurveEditor {
-  constructor(container, { curve, vMin = 0, vMax = 1, onChange }) {
+  // `name` is what this curve is called in the inspector ("Size / life"). An
+  // emitter holds three of these, so without it every one of them offers a
+  // "Key value" box and a "Delete" button by exactly the same name.
+  constructor(container, { curve, vMin = 0, vMax = 1, onChange, name = 'Curve' }) {
     this.curve = curve;
     this.onChange = onChange;
+    this.name = name;
     this.defaultView = { tMin: 0, tMax: 1, vMin, vMax };
     this.view = { ...this.defaultView };
     this.selected = null;
@@ -45,12 +49,14 @@ export class CurveEditor {
     this.fitBtn = document.createElement('button');
     this.fitBtn.type = 'button';
     this.fitBtn.className = 'btn btn-small';
-    this.fitBtn.title = 'Fit view to keys';
+    this.fitBtn.title = `Fit view to keys — ${name}`;
+    this.fitBtn.setAttribute('aria-label', `Fit view to keys — ${name}`);
     this.fitBtn.textContent = '⤢';
     this.resetBtn = document.createElement('button');
     this.resetBtn.type = 'button';
     this.resetBtn.className = 'btn btn-small';
-    this.resetBtn.title = 'Reset view';
+    this.resetBtn.title = `Reset view — ${name}`;
+    this.resetBtn.setAttribute('aria-label', `Reset view — ${name}`);
     this.resetBtn.textContent = '↺';
     viewTools.append(this.fitBtn, this.resetBtn);
     this.wrap.appendChild(viewTools);
@@ -67,21 +73,24 @@ export class CurveEditor {
     this.tIn.type = 'number';
     this.tIn.step = '0.01';
     this.tIn.className = 'num-in curve-num-in';
-    this.tIn.title = 'Key position (life 0–1)';
+    this.tIn.title = `${name} key position (life 0–1)`;
     this.vIn = document.createElement('input');
     this.vIn.type = 'number';
     this.vIn.step = '0.01';
     this.vIn.className = 'num-in curve-num-in';
-    this.vIn.title = 'Key value';
+    this.vIn.title = `${name} key value`;
     this.autoBtn = document.createElement('button');
     this.autoBtn.type = 'button';
     this.autoBtn.className = 'btn btn-small';
     this.autoBtn.textContent = 'Smooth';
-    this.autoBtn.title = 'Reset tangents to auto-smoothed';
+    this.autoBtn.title = `Smooth — reset ${name} tangents to auto-smoothed`;
+    this.autoBtn.setAttribute('aria-label', `Smooth — ${name} tangents`);
     this.delBtn = document.createElement('button');
     this.delBtn.type = 'button';
     this.delBtn.className = 'btn btn-small btn-danger';
     this.delBtn.textContent = 'Delete';
+    this.delBtn.title = `Delete — remove the selected ${name} key`;
+    this.delBtn.setAttribute('aria-label', `Delete — selected ${name} key`);
     this.hint = document.createElement('span');
     this.hint.className = 'curve-hint muted';
     this.hint.textContent = 'Double-click to add a point · drag handles for tangents';
@@ -481,9 +490,11 @@ export class CurveEditor {
 }
 
 export class GradientEditor {
-  constructor(container, { gradient, onChange }) {
+  /** `name`: see CurveEditor — it tells one editor's controls from another's. */
+  constructor(container, { gradient, onChange, name = 'Gradient' }) {
     this.gradient = gradient;
     this.onChange = onChange;
+    this.name = name;
     this.selected = 0;
     this.drag = null;
     this.canvas = document.createElement('canvas');
@@ -498,13 +509,15 @@ export class GradientEditor {
     this.colorInput = document.createElement('input');
     this.colorInput.type = 'color';
     this.colorInput.className = 'gradient-color-input';
-    this.colorInput.title = 'Colour of the selected stop';
+    this.colorInput.title = `${name} — colour of the selected stop`;
     this.info = document.createElement('span');
     this.info.className = 'gradient-stop-info';
     this.delBtn = document.createElement('button');
     this.delBtn.type = 'button';
     this.delBtn.className = 'btn btn-small';
     this.delBtn.textContent = 'Remove stop';
+    this.delBtn.title = `Remove stop — ${name}`;
+    this.delBtn.setAttribute('aria-label', `Remove stop — ${name}`);
     tools.append(this.colorInput, this.info, this.delBtn);
     container.appendChild(tools);
 
