@@ -38,8 +38,9 @@
     <option value="5">View: Depth</option>
   </select>
   <div class="flex-spacer"></div>
-  <button id="btn-play" class="btn" type="button" title="Play/Pause (Space)">⏸</button>
-  <button id="btn-restart" class="btn" type="button" title="Restart">⟲</button>
+  <button id="btn-play" class="btn" type="button" title="Play/Pause (Space)"
+    aria-label="Play/Pause">⏸</button>
+  <button id="btn-restart" class="btn" type="button" title="Restart" aria-label="Restart">⟲</button>
   <select id="speed-select" class="select-in" title="Time scale">
     <option value="0.25">0.25×</option>
     <option value="0.5">0.5×</option>
@@ -54,7 +55,8 @@
   <button id="btn-export-media" class="btn" type="button" title="Export a video or GIF clip for sharing">Export Media</button>
   <button id="btn-import" class="btn" type="button" title="Import effect JSON">Import</button>
   <button id="btn-publish" class="btn btn-accent" type="button" title="Publish to the community gallery">Publish</button>
-  <button id="btn-help" class="btn btn-icon" type="button" title="Shader API help">?</button>
+  <button id="btn-help" class="btn btn-icon" type="button" title="Shader API help"
+    aria-label="Shader API help">?</button>
 </header>
 
 <div id="main">
@@ -63,7 +65,8 @@
       <canvas id="gl"></canvas>
       <div id="viewport-overlay">
         <span id="stats"></span>
-        <button id="btn-cam-reset" class="btn btn-small" type="button" title="Reset camera">⌂ cam</button>
+        <button id="btn-cam-reset" class="btn btn-small" type="button" title="Reset camera"
+          aria-label="Reset camera">⌂ cam</button>
       </div>
       <div id="gl-error" class="hidden"></div>
     </div>
