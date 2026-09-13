@@ -158,7 +158,8 @@ everything else works without them.
 
 ## Controls
 
-- **Orbit** left-drag · **pan** right/shift-drag · **zoom** wheel · **Space** play/pause
+- **Orbit** left-drag or one-finger drag · **pan** right/shift-drag or two-finger drag ·
+  **zoom** wheel or pinch · **Space** play/pause
 - **Ctrl+Enter** in the shader editor compiles immediately (auto-compile is on by default)
 - Curve editors: drag keys, double-click to add, right-click to remove.
   Gradient editor: double-click a stop to recolor, double-click empty space to add.
