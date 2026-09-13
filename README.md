@@ -8,6 +8,9 @@ Built as a fully static web app: plain ES modules, WebGPU, no build step. Shader
 written in [Slang](https://shader-slang.org) and compiled to WGSL in the browser by a
 vendored copy of the Slang compiler (`js/vendor/slang`, 24 MB — the app's one dependency).
 
+Try it at **[particletoy.com](https://particletoy.com/)** or jump straight into the
+**[editor](https://particletoy.com/editor.html)**.
+
 ## AI disclosure
 
 This project was made entirely with AI prompting. Every line of code — editor, renderer,
@@ -17,14 +20,20 @@ prompting an AI assistant. No code in this repository was handwritten.
 The **DougAI** account hosting this repo is used exclusively for AI-generated projects.
 My non-AI, handwritten work lives at [github.com/douglaspotesta](https://github.com/douglaspotesta).
 
-## Run it
- 
+## Run it locally
+
+You'll need Python 3 and a browser with WebGPU support (current Chrome, Edge, Safari,
+or Firefox). Then:
+
 ```bash
-python serve.py     # → http://localhost:8917
+git clone https://github.com/DougAI/particletoy.git
+cd particletoy
+python serve.py
 ```
 
-Any static file server works (see the note about Windows MIME types in
-[setup.html](setup.html)). Requires WebGPU (current Chrome / Edge / Safari / Firefox).
+Open [http://localhost:8917](http://localhost:8917). There is no package installation or
+build step. Any static file server works; see the note about Windows MIME types in
+[setup.html](setup.html).
 
 ## Shaders are Slang
 
