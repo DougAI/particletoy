@@ -48,6 +48,7 @@ html, body {
 .brand b { color: var(--accent); font-weight: 700; }
 .topbar-sep { width: 1px; height: 22px; background: var(--border); }
 .fx-name { width: 150px; }
+#btn-mobile-actions { display: none; }
 
 .seg { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .seg-btn {
@@ -493,14 +494,27 @@ input[type="checkbox"] { accent-color: var(--accent-2); width: 15px; height: 15p
   #topbar {
     width: 100%;
     flex: none;
-    overflow-x: auto;
-    overflow-y: hidden;
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
+    overflow: hidden;
+    flex-wrap: wrap;
+    align-content: center;
+    transition: height 0.16s ease;
   }
-  #topbar::-webkit-scrollbar { display: none; }
   #topbar > * { flex: none; }
-  .fx-name { width: 128px; }
+  #topbar .brand { display: none; }
+  #topbar .mobile-secondary { display: none; order: 2; }
+  #topbar.mobile-actions-open {
+    height: auto;
+    max-height: min(70dvh, 420px);
+    padding-top: 5px;
+    padding-bottom: 7px;
+    align-content: flex-start;
+    overflow-y: auto;
+  }
+  #topbar.mobile-actions-open .mobile-secondary { display: revert; }
+  #topbar.mobile-actions-open .seg.mobile-secondary { display: flex; }
+  #topbar.mobile-actions-open .topbar-sep { display: none; }
+  .fx-name { width: auto; min-width: 76px; flex: 1 !important; }
+  #btn-mobile-actions { display: block; }
 
   #main {
     flex: 1;

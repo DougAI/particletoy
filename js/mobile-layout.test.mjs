@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { createMobileWorkspace, MOBILE_VIEW_KEY, normalizeMobileView } from './mobile-layout.js';
+import {
+  createMobileCommandBar, createMobileWorkspace, MOBILE_VIEW_KEY, normalizeMobileView,
+} from './mobile-layout.js';
 
 function tab(view) {
   const listeners = new Map();
@@ -55,3 +57,35 @@ assert.deepEqual(changes.at(-1), ['preview', false]);
 workspace.destroy();
 
 console.log('mobile workspace controller: ok');
+
+function eventTarget(extra = {}) {
+  const listeners = new Map();
+  return {
+    ...extra,
+    attrs: {},
+    addEventListener(name, handler) { listeners.set(name, handler); },
+    removeEventListener(name) { listeners.delete(name); },
+    emit(name, event = {}) { listeners.get(name)?.(event); },
+    setAttribute(name, value) { this.attrs[name] = value; },
+  };
+}
+
+const bar = eventTarget({
+  classList: { open: false, toggle(_name, value) { this.open = value; } },
+});
+const toggle = eventTarget({ textContent: '' });
+const commandMedia = eventTarget({ matches: true });
+const commandBar = createMobileCommandBar({ bar, toggle, mediaQuery: commandMedia });
+toggle.emit('click');
+assert.equal(commandBar.open, true);
+assert.equal(bar.classList.open, true);
+assert.equal(toggle.attrs['aria-expanded'], 'true');
+bar.emit('keydown', { key: 'Escape' });
+assert.equal(commandBar.open, false);
+commandBar.setOpen(true);
+commandMedia.matches = false;
+commandMedia.emit('change');
+assert.equal(commandBar.open, false);
+assert.equal(bar.classList.open, false);
+commandBar.destroy();
+console.log('mobile command bar controller: ok');

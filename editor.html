@@ -24,12 +24,12 @@
 <header id="topbar">
   <a class="brand" href="index.html" title="Back to the front page" style="text-decoration:none">particle<b>toy</b></a>
   <input id="fx-name" class="text-in fx-name" value="Untitled" title="Effect name">
-  <select id="preset-select" class="select-in" title="Load a preset"></select>
-  <div class="seg" id="pipeline-seg" title="Graphics pipeline">
+  <select id="preset-select" class="select-in mobile-secondary" title="Load a preset"></select>
+  <div class="seg mobile-secondary" id="pipeline-seg" title="Graphics pipeline">
     <button id="pipe-deferred" class="seg-btn active" type="button">PBR · Deferred</button>
     <button id="pipe-forward" class="seg-btn" type="button">PBR · Forward</button>
   </div>
-  <select id="debug-select" class="select-in" title="G-buffer debug view (deferred)">
+  <select id="debug-select" class="select-in mobile-secondary" title="G-buffer debug view (deferred)">
     <option value="0">View: Final</option>
     <option value="1">View: Albedo</option>
     <option value="2">View: Normals</option>
@@ -41,22 +41,24 @@
   <button id="btn-play" class="btn" type="button" title="Play/Pause (Space)"
     aria-label="Play/Pause">⏸</button>
   <button id="btn-restart" class="btn" type="button" title="Restart" aria-label="Restart">⟲</button>
-  <select id="speed-select" class="select-in" title="Time scale">
+  <select id="speed-select" class="select-in mobile-secondary" title="Time scale">
     <option value="0.25">0.25×</option>
     <option value="0.5">0.5×</option>
     <option value="1" selected>1×</option>
     <option value="2">2×</option>
   </select>
-  <span class="topbar-sep"></span>
+  <span class="topbar-sep mobile-secondary"></span>
   <button id="btn-share" class="btn" type="button" title="Copy a shareable link (no account needed)">Share</button>
   <button id="btn-save" class="btn" type="button" title="Save to browser library">Save</button>
-  <button id="btn-library" class="btn" type="button" title="Open browser library">Library</button>
-  <button id="btn-export" class="btn" type="button" title="Download effect JSON">Export</button>
-  <button id="btn-export-media" class="btn" type="button" title="Export a video or GIF clip for sharing">Export Media</button>
-  <button id="btn-import" class="btn" type="button" title="Import effect JSON">Import</button>
-  <button id="btn-publish" class="btn btn-accent" type="button" title="Publish to the community gallery">Publish</button>
-  <button id="btn-help" class="btn btn-icon" type="button" title="Shader API help"
+  <button id="btn-library" class="btn mobile-secondary" type="button" title="Open browser library">Library</button>
+  <button id="btn-export" class="btn mobile-secondary" type="button" title="Download effect JSON">Export</button>
+  <button id="btn-export-media" class="btn mobile-secondary" type="button" title="Export a video or GIF clip for sharing">Export Media</button>
+  <button id="btn-import" class="btn mobile-secondary" type="button" title="Import effect JSON">Import</button>
+  <button id="btn-publish" class="btn btn-accent mobile-secondary" type="button" title="Publish to the community gallery">Publish</button>
+  <button id="btn-help" class="btn btn-icon mobile-secondary" type="button" title="Shader API help"
     aria-label="Shader API help">?</button>
+  <button id="btn-mobile-actions" class="btn btn-icon" type="button" title="More editor actions"
+    aria-label="More editor actions" aria-expanded="false">•••</button>
 </header>
 
 <div id="main">

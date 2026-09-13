@@ -83,3 +83,38 @@ export function setupMobileWorkspace({ root = document, win = window } = {}) {
     onChange: () => win.dispatchEvent(new win.Event('resize')),
   });
 }
+
+export function createMobileCommandBar({ bar, toggle, mediaQuery }) {
+  let open = false;
+  const render = () => {
+    bar.classList.toggle('mobile-actions-open', open && mediaQuery.matches);
+    toggle.setAttribute('aria-expanded', String(open && mediaQuery.matches));
+    toggle.setAttribute('aria-label', open ? 'Close editor actions' : 'More editor actions');
+    toggle.textContent = open ? '×' : '•••';
+  };
+  const setOpen = (next) => { open = Boolean(next); render(); };
+  const click = () => setOpen(!open);
+  const keydown = (event) => { if (event.key === 'Escape' && open) setOpen(false); };
+  const mediaChange = () => { if (!mediaQuery.matches) open = false; render(); };
+  toggle.addEventListener('click', click);
+  bar.addEventListener('keydown', keydown);
+  mediaQuery.addEventListener?.('change', mediaChange);
+  render();
+  return {
+    get open() { return open; },
+    setOpen,
+    destroy() {
+      toggle.removeEventListener('click', click);
+      bar.removeEventListener('keydown', keydown);
+      mediaQuery.removeEventListener?.('change', mediaChange);
+    },
+  };
+}
+
+export function setupMobileCommandBar({ root = document, win = window } = {}) {
+  return createMobileCommandBar({
+    bar: root.getElementById('topbar'),
+    toggle: root.getElementById('btn-mobile-actions'),
+    mediaQuery: win.matchMedia('(max-width: 760px)'),
+  });
+}

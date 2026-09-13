@@ -19,9 +19,10 @@ import {
   exportVideo, exportGif, getVideoMimeType, capturePreviewClip, MAX_EXPORT_SECONDS,
   prerollFor, CLIP_LIMITS, PREVIEW_DEFAULT_SECONDS,
 } from './exportmedia.js';
-import { setupMobileWorkspace } from './mobile-layout.js';
+import { setupMobileCommandBar, setupMobileWorkspace } from './mobile-layout.js';
 
 const mobileWorkspace = setupMobileWorkspace();
+const mobileCommandBar = setupMobileCommandBar();
 
 const canvas = document.getElementById('gl');
 const { device, context, format, error: gpuError } = await createGPU(canvas);
@@ -134,7 +135,9 @@ const app = {
 };
 // For curious consoles — and for anything driving the editor from the outside,
 // which needs a way to tell "still starting up" from "this browser can't render".
-window.__particletoy = { app, renderer, device, canvas, mobileWorkspace, gpuError: gpuError ?? null };
+window.__particletoy = {
+  app, renderer, device, canvas, mobileWorkspace, mobileCommandBar, gpuError: gpuError ?? null,
+};
 
 // Cloud state: set when the effect was loaded from (or published to) the
 // community gallery, so Publish knows whether to update-in-place or create.
