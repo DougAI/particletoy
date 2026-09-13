@@ -119,6 +119,8 @@ html, body {
   overflow: hidden;
 }
 
+#mobile-tabs { display: none; }
+
 /* ---------------------------------------------------------------- buttons */
 .btn {
   background: var(--panel-2);
@@ -480,3 +482,84 @@ input[type="checkbox"] { accent-color: var(--accent-2); width: 15px; height: 15p
   z-index: 100;
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ------------------------------------------------------- narrow workspaces
+   A three-column editor cannot merely shrink into a phone. Give each task the
+   whole screen and keep the desktop split layout untouched above this width. */
+@media (max-width: 760px) {
+  html, body { height: 100%; height: 100dvh; }
+  body { display: flex; flex-direction: column; }
+
+  #topbar {
+    width: 100%;
+    flex: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  #topbar::-webkit-scrollbar { display: none; }
+  #topbar > * { flex: none; }
+  .fx-name { width: 128px; }
+
+  #main {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    height: auto;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #splitter { display: none; }
+  #left, #right {
+    min-width: 0;
+    width: 100%;
+    height: 100%;
+  }
+  #viewport, #inspector { height: 100%; min-height: 0; }
+  #right { border-left: 0; }
+
+  body[data-mobile-view="preview"] #inspector,
+  body[data-mobile-view="preview"] #right,
+  body[data-mobile-view="inspect"] #viewport,
+  body[data-mobile-view="inspect"] #right,
+  body[data-mobile-view="code"] #left { display: none; }
+
+  #editor-toolbar {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  #editor-toolbar::-webkit-scrollbar { display: none; }
+  #editor-toolbar > * { flex: none; }
+  #editor-toolbar .flex-spacer { min-width: 8px; }
+
+  #mobile-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    flex: none;
+    min-height: 48px;
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+  }
+  .mobile-tab {
+    min-width: 0;
+    min-height: 47px;
+    border: 0;
+    border-top: 2px solid transparent;
+    background: transparent;
+    color: var(--text-dim);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .mobile-tab.active {
+    color: var(--accent);
+    border-top-color: var(--accent);
+    background: var(--panel-2);
+  }
+
+  .btn, .seg-btn, .select-in, .text-in { min-height: 36px; }
+  #viewport-overlay { bottom: 10px; }
+  #toast { bottom: calc(62px + env(safe-area-inset-bottom)); max-width: 90vw; }
+}

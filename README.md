@@ -183,10 +183,12 @@ material API wrappers), `js/particles.js` (CPU simulation), `js/simlib.js` +
 `js/gpusim.js` (compute simulation: codegen, runtime, bitonic sort),
 `js/slangc.js` (the Slang → WGSL compile service, sole owner of the wasm),
 `js/wgslcache.js` (compiled WGSL saved with each effect), `js/ui.js` (inspector +
-editor panel). `js/exportmedia.js` renders clips on a detached canvas — both the
+editor panel), and `js/mobile-layout.js` (narrow-screen workspace navigation).
+`js/exportmedia.js` renders clips on a detached canvas — both the
 Export Media downloads and the link-preview clips. `og/index.js` is the only
-server-side code in the project. Three dependency-free test files, run with plain
+server-side code in the project. Four dependency-free test files, run with plain
 `node` and no install: `og/index.test.mjs` (the Open Graph tag contract),
 `js/exportmedia.test.mjs` (how much of an effect a preview clip skips, and how far
 the simulation moves between two recorded frames) and `js/wgslcache.test.mjs` (what a
-saved effect must carry for the gallery to render it).
+saved effect must carry for the gallery to render it), and `js/mobile-layout.test.mjs`
+(responsive workspace state and persistence).

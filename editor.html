@@ -20,7 +20,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✨</text></svg>">
 <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
+<body data-mobile-view="preview">
 <header id="topbar">
   <a class="brand" href="index.html" title="Back to the front page" style="text-decoration:none">particle<b>toy</b></a>
   <input id="fx-name" class="text-in fx-name" value="Untitled" title="Effect name">
@@ -79,6 +79,15 @@
     <div id="editor-errors"></div>
   </div>
 </div>
+
+<nav id="mobile-tabs" aria-label="Editor workspace" role="tablist">
+  <button class="mobile-tab active" type="button" role="tab" data-mobile-view="preview"
+    aria-controls="viewport" aria-selected="true">Preview</button>
+  <button class="mobile-tab" type="button" role="tab" data-mobile-view="inspect"
+    aria-controls="inspector" aria-selected="false">Inspect</button>
+  <button class="mobile-tab" type="button" role="tab" data-mobile-view="code"
+    aria-controls="right" aria-selected="false">Code</button>
+</nav>
 
 <div id="modal-root"></div>
 <script type="module" src="js/main.js"></script>
