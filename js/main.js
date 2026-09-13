@@ -20,9 +20,17 @@ import {
   prerollFor, CLIP_LIMITS, PREVIEW_DEFAULT_SECONDS,
 } from './exportmedia.js';
 import { setupMobileCommandBar, setupMobileWorkspace } from './mobile-layout.js';
+import { AdaptiveQuality, loadQualityMode, saveQualityMode } from './quality.js';
 
 const mobileWorkspace = setupMobileWorkspace();
 const mobileCommandBar = setupMobileCommandBar();
+let localStorageRef = null;
+try { localStorageRef = window.localStorage; } catch { /* storage can be disabled */ }
+const qualityMode = loadQualityMode(localStorageRef);
+const renderQuality = new AdaptiveQuality({
+  mode: qualityMode,
+  initialScale: window.matchMedia('(max-width: 760px)').matches ? 0.75 : 1,
+});
 
 const canvas = document.getElementById('gl');
 const { device, context, format, error: gpuError } = await createGPU(canvas);
@@ -398,6 +406,12 @@ function wireToolbar() {
   document.getElementById('btn-restart').addEventListener('click', restart);
   document.getElementById('speed-select').addEventListener('change', (e) => {
     app.timeScale = parseFloat(e.target.value);
+  });
+  const qualitySelect = document.getElementById('quality-select');
+  qualitySelect.value = renderQuality.mode;
+  qualitySelect.addEventListener('change', () => {
+    renderQuality.setMode(qualitySelect.value);
+    saveQualityMode(localStorageRef, renderQuality.mode);
   });
   document.getElementById('fx-name').addEventListener('change', (e) => {
     app.name = e.target.value || 'Untitled';
@@ -940,7 +954,7 @@ function updateStats(dt) {
     let particles = 0;
     for (const em of app.emitters) particles += em.count;
     document.getElementById('stats').textContent =
-      `${fps} fps · ${particles.toLocaleString()} particles · ${app.pipeline}`;
+      `${fps} fps · ${particles.toLocaleString()} particles · ${app.pipeline} · ${Math.round(renderQuality.scale * 100)}%`;
     const items = document.querySelectorAll('.emitter-item .emitter-count');
     app.emitters.forEach((em, i) => { if (items[i]) items[i].textContent = em.count; });
     frames = 0;
@@ -960,7 +974,8 @@ function frame(now) {
   last = now;
 
   const holder = document.getElementById('viewport');
-  const dpr = Math.min(1.75, window.devicePixelRatio || 1);
+  renderQuality.update(rawDt);
+  const dpr = Math.min(1.75, window.devicePixelRatio || 1) * renderQuality.scale;
   const w = Math.max(2, Math.floor(holder.clientWidth * dpr));
   const h = Math.max(2, Math.floor(holder.clientHeight * dpr));
   if (canvas.width !== w || canvas.height !== h) {

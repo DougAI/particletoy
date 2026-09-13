@@ -104,7 +104,8 @@ browsing and hover previews cost nothing extra.
 
 Both share the same lighting model (GGX specular, hemisphere ambient + procedural sky
 environment, directional sun + up to 4 point lights) plus HDR rendering, bloom, and ACES
-tonemapping.
+tonemapping. Render quality can be pinned to Full, Balanced, or Performance, or left on
+Auto to adapt internal resolution gradually from measured frame time.
 
 **Explore, test, share:**
 
