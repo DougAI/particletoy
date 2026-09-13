@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {
-  applyAiPatch, buildEffectBrief, describeAiChanges, effectForAi, parseAiPatch,
+  applyAiPatch, buildAiRequest, buildEffectBrief, describeAiChanges, effectForAi, parseAiPatch,
 } from './ai.js';
 
 const source = {
@@ -18,6 +18,18 @@ assert.match(brief, /particletoy effect brief v1/);
 assert.match(brief, /Shader language: slang/);
 assert.match(brief, /"name": "Test"/);
 assert.doesNotMatch(brief, /enormous/);
+
+const request = buildAiRequest({
+  prompt: 'Make the campfire sparks brighter',
+  data: source,
+  diagnostics: ['fragment.slang:12: unknown identifier glow'],
+});
+assert.match(request, /Make the campfire sparks brighter/);
+assert.match(request, /"operations"/);
+assert.match(request, /\/scene\/bloom/);
+assert.match(request, /unknown identifier glow/);
+assert.match(request, /"name": "Test"/);
+assert.throws(() => buildAiRequest({ prompt: '  ', data: source }), /Describe/);
 
 console.log('AI effect brief: ok');
 

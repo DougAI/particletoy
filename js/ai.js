@@ -40,6 +40,33 @@ ${JSON.stringify(effect, null, 2)}
 `;
 }
 
+export function buildAiRequest({ prompt, data, diagnostics = [] }) {
+  const request = String(prompt || '').trim();
+  if (!request) throw new Error('Describe the effect change you want first');
+  const diagnosticText = diagnostics.length
+    ? `\n## Current diagnostics\n\n${diagnostics.map((item) => `- ${item}`).join('\n')}\n`
+    : '';
+  return `# particletoy AI edit request
+
+## Request
+
+${request}
+
+## Required response format
+
+Return exactly one JSON object and no surrounding prose or Markdown fence:
+
+{"version":1,"summary":"short description","operations":[{"op":"replace","path":"/scene/bloom","value":1}]}
+
+- Use only add, replace, or remove operations.
+- Paths are JSON Pointers rooted at /name, /scene, /emitters, or /materials.
+- Preserve schema version 2, Slang shader language, unique IDs, and valid material references.
+- Do not return JavaScript, HTML, commands, or a complete replacement effect.
+- Keep the edit focused on the request and avoid unrelated changes.
+${diagnosticText}
+${buildEffectBrief(data)}`;
+}
+
 function pointerSegments(path) {
   if (typeof path !== 'string' || !path.startsWith('/')) throw new Error('Every operation needs a JSON Pointer path');
   const parts = path.slice(1).split('/').map((part) => part.replace(/~1/g, '/').replace(/~0/g, '~'));

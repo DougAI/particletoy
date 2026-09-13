@@ -436,6 +436,11 @@ input[type="checkbox"] { accent-color: var(--accent-2); width: 15px; height: 15p
 .share-url { width: 100%; font-family: var(--mono); font-size: 11px; margin: 8px 0; }
 .ai-workspace { display: flex; flex-direction: column; min-height: 0; }
 .ai-brief { min-height: 52vh; resize: vertical; white-space: pre; }
+.ai-prompt { min-height: 96px; resize: vertical; margin-bottom: 8px; }
+.ai-thread { display: grid; gap: 6px; margin: 8px 0; }
+.ai-message { max-width: 88%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; line-height: 1.4; }
+.ai-message-user { justify-self: end; background: color-mix(in srgb, var(--accent) 14%, var(--panel)); }
+.ai-message-assistant { justify-self: start; background: var(--panel-2); }
 .ai-patch { min-height: 120px; }
 .ai-patch-preview {
   margin: 10px 0;

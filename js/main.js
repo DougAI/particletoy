@@ -22,7 +22,7 @@ import {
 import { setupMobileCommandBar, setupMobileWorkspace } from './mobile-layout.js';
 import { AdaptiveQuality, loadQualityMode, saveQualityMode } from './quality.js';
 import { registerPwa } from './pwa.js';
-import { applyAiPatch, buildEffectBrief, describeAiChanges, parseAiPatch } from './ai.js';
+import { applyAiPatch, buildAiRequest, buildEffectBrief, describeAiChanges, parseAiPatch } from './ai.js';
 
 void registerPwa();
 
@@ -484,8 +484,18 @@ function showAiBrief() {
   wrap.className = 'ai-workspace';
   const intro = document.createElement('p');
   intro.className = 'muted';
-  intro.textContent = 'Copy this provider-neutral brief into an AI assistant. It includes the current effect, its schema, and the rules needed to return usable JSON.';
+  intro.textContent = 'Describe a change, copy the complete request into any AI assistant, then paste its operation document below. The effect never changes without preview and approval.';
   const brief = buildEffectBrief(currentData());
+  const promptLabel = document.createElement('label');
+  promptLabel.className = 'prop-label';
+  promptLabel.textContent = 'What should change?';
+  const prompt = document.createElement('textarea');
+  prompt.className = 'obj-in ai-prompt';
+  prompt.placeholder = 'Make the sparks rise more slowly and fade from warm gold to deep red.';
+  prompt.setAttribute('aria-label', 'AI edit request');
+  const thread = document.createElement('div');
+  thread.className = 'ai-thread';
+  thread.setAttribute('aria-live', 'polite');
   const text = document.createElement('textarea');
   text.className = 'obj-in ai-brief';
   text.readOnly = true;
@@ -496,15 +506,28 @@ function showAiBrief() {
   const copy = document.createElement('button');
   copy.type = 'button';
   copy.className = 'btn btn-accent';
-  copy.textContent = 'Copy brief';
+  copy.textContent = 'Copy AI request';
   copy.addEventListener('click', async () => {
+    let request;
     try {
-      await navigator.clipboard.writeText(brief);
-      toast('AI brief copied');
+      request = buildAiRequest({ prompt: prompt.value, data: currentData() });
+    } catch (error) {
+      prompt.focus();
+      toast(error.message);
+      return;
+    }
+    const message = document.createElement('div');
+    message.className = 'ai-message ai-message-user';
+    message.textContent = prompt.value.trim();
+    thread.append(message);
+    try {
+      await navigator.clipboard.writeText(request);
+      toast('AI request copied');
     } catch {
       text.focus();
+      text.value = request;
       text.select();
-      toast('Select and copy the brief');
+      toast('Select and copy the generated request');
     }
   });
   const download = document.createElement('button');
@@ -516,6 +539,14 @@ function showAiBrief() {
     `${(app.name || 'effect').replace(/[^\w-]+/g, '_')}.particletoy-ai.md`,
   ));
   actions.append(copy, download);
+  const briefSection = document.createElement('details');
+  briefSection.className = 'section dialog-section';
+  const briefSummary = document.createElement('summary');
+  briefSummary.textContent = 'Inspect current effect brief';
+  const briefBody = document.createElement('div');
+  briefBody.className = 'section-body';
+  briefBody.append(text);
+  briefSection.append(briefSummary, briefBody);
   const patchSection = document.createElement('details');
   patchSection.className = 'section dialog-section';
   const patchSummary = document.createElement('summary');
@@ -547,6 +578,10 @@ function showAiBrief() {
       const patch = parseAiPatch(patchText.value);
       const patched = applyAiPatch(JSON.parse(before), patch);
       result.textContent = `${patch.summary || 'AI patch'}\n\n${describeAiChanges(patched.changes)}`;
+      const message = document.createElement('div');
+      message.className = 'ai-message ai-message-assistant';
+      message.textContent = `${patch.summary || 'AI patch'} — ${patched.changes.length} proposed change${patched.changes.length === 1 ? '' : 's'}`;
+      thread.append(message);
       pending = { before, effect: patched.effect, count: patched.changes.length };
       apply.textContent = `Apply ${patched.changes.length} change${patched.changes.length === 1 ? '' : 's'}`;
       apply.classList.remove('hidden');
@@ -572,8 +607,8 @@ function showAiBrief() {
   });
   patchBody.append(patchIntro, patchText, preview, result, apply);
   patchSection.append(patchSummary, patchBody);
-  wrap.append(intro, text, actions, patchSection);
-  modal('AI Assist — Effect Brief', wrap, { wide: true });
+  wrap.append(intro, promptLabel, prompt, actions, thread, briefSection, patchSection);
+  modal('AI Assist', wrap, { wide: true });
 }
 
 function showLibrary() {
