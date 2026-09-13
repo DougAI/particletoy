@@ -22,7 +22,7 @@ import {
 import { setupMobileCommandBar, setupMobileWorkspace } from './mobile-layout.js';
 import { AdaptiveQuality, loadQualityMode, saveQualityMode } from './quality.js';
 import { registerPwa } from './pwa.js';
-import { buildEffectBrief } from './ai.js';
+import { applyAiPatch, buildEffectBrief, describeAiChanges, parseAiPatch } from './ai.js';
 
 void registerPwa();
 
@@ -516,7 +516,63 @@ function showAiBrief() {
     `${(app.name || 'effect').replace(/[^\w-]+/g, '_')}.particletoy-ai.md`,
   ));
   actions.append(copy, download);
-  wrap.append(intro, text, actions);
+  const patchSection = document.createElement('details');
+  patchSection.className = 'section dialog-section';
+  const patchSummary = document.createElement('summary');
+  patchSummary.textContent = 'Preview an AI patch';
+  const patchBody = document.createElement('div');
+  patchBody.className = 'section-body';
+  const patchIntro = document.createElement('p');
+  patchIntro.className = 'muted';
+  patchIntro.textContent = 'Paste a version 1 operation document. Nothing changes until you inspect the preview and press Apply.';
+  const patchText = document.createElement('textarea');
+  patchText.className = 'obj-in ai-patch';
+  patchText.placeholder = '{"version":1,"summary":"…","operations":[{"op":"replace","path":"/scene/bloom","value":1}]}';
+  patchText.setAttribute('aria-label', 'AI patch JSON');
+  const preview = document.createElement('button');
+  preview.type = 'button';
+  preview.className = 'btn';
+  preview.textContent = 'Preview patch';
+  const result = document.createElement('pre');
+  result.className = 'ai-patch-preview';
+  const apply = document.createElement('button');
+  apply.type = 'button';
+  apply.className = 'btn btn-accent hidden';
+  let pending = null;
+  preview.addEventListener('click', () => {
+    apply.classList.add('hidden');
+    pending = null;
+    try {
+      const before = JSON.stringify(currentData());
+      const patch = parseAiPatch(patchText.value);
+      const patched = applyAiPatch(JSON.parse(before), patch);
+      result.textContent = `${patch.summary || 'AI patch'}\n\n${describeAiChanges(patched.changes)}`;
+      pending = { before, effect: patched.effect, count: patched.changes.length };
+      apply.textContent = `Apply ${patched.changes.length} change${patched.changes.length === 1 ? '' : 's'}`;
+      apply.classList.remove('hidden');
+    } catch (error) {
+      result.textContent = `Cannot preview: ${error.message}`;
+    }
+  });
+  apply.addEventListener('click', () => {
+    if (!pending) return;
+    if (JSON.stringify(currentData()) !== pending.before) {
+      result.textContent = 'The effect changed after this preview. Preview the patch again before applying it.';
+      apply.classList.add('hidden');
+      pending = null;
+      return;
+    }
+    history.record(apply);
+    applyData(pending.effect);
+    history.flush();
+    toast(`Applied ${pending.count} AI patch change${pending.count === 1 ? '' : 's'} — Undo is available`);
+    result.textContent += '\n\nApplied. Use Undo to revert.';
+    apply.classList.add('hidden');
+    pending = null;
+  });
+  patchBody.append(patchIntro, patchText, preview, result, apply);
+  patchSection.append(patchSummary, patchBody);
+  wrap.append(intro, text, actions, patchSection);
   modal('AI Assist — Effect Brief', wrap, { wide: true });
 }
 

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { buildEffectBrief, effectForAi } from './ai.js';
+import {
+  applyAiPatch, buildEffectBrief, describeAiChanges, effectForAi, parseAiPatch,
+} from './ai.js';
 
 const source = {
   v: 2, shaderLang: 'slang', name: 'Test',
@@ -19,3 +21,23 @@ assert.doesNotMatch(brief, /enormous/);
 
 console.log('AI effect brief: ok');
 
+const patch = parseAiPatch(`\`\`\`json
+{"version":1,"summary":"brighter","operations":[
+  {"op":"replace","path":"/scene/bloom","value":1.2},
+  {"op":"replace","path":"/name","value":"Brighter Test"}
+]}
+\`\`\``);
+const applied = applyAiPatch(source, patch);
+assert.equal(applied.effect.scene.bloom, 1.2);
+assert.equal(applied.effect.name, 'Brighter Test');
+assert.equal(source.scene.bloom, 0.5, 'patch preview does not mutate the live effect');
+assert.match(describeAiChanges(applied.changes), /REPLACE \/scene\/bloom/);
+assert.throws(() => applyAiPatch(source, {
+  version: 1, operations: [{ op: 'replace', path: '/__proto__/polluted', value: true }],
+}), /not editable|Unsafe/);
+assert.throws(() => applyAiPatch(source, {
+  version: 1, operations: [{ op: 'remove', path: '/materials/0' }],
+}), /At least one material/);
+assert.throws(() => parseAiPatch('{bad'), /not valid JSON/);
+
+console.log('AI patch validation and preview: ok');
