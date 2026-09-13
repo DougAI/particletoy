@@ -23,6 +23,32 @@ function hexToLin(hex) {
 }
 export { linToHex, hexToLin };
 
+export function widestGapPosition(items) {
+  const points = items.map((item) => clamp(item.t, 0, 1)).sort((a, b) => a - b);
+  if (!points.length) return 0.5;
+  let from = 0;
+  let to = points[0];
+  for (let i = 0; i < points.length - 1; i++) {
+    if (points[i + 1] - points[i] > to - from) {
+      from = points[i];
+      to = points[i + 1];
+    }
+  }
+  if (1 - points.at(-1) > to - from) {
+    from = points.at(-1);
+    to = 1;
+  }
+  return (from + to) / 2;
+}
+
+export function nudgePoint(items, index, delta) {
+  const item = items[index];
+  if (!item) return index;
+  item.t = clamp(item.t + delta, 0, 1);
+  items.sort((a, b) => a.t - b.t);
+  return items.indexOf(item);
+}
+
 export class CurveEditor {
   // `name` is what this curve is called in the inspector ("Size / life"). An
   // emitter holds three of these, so without it every one of them offers a
@@ -87,6 +113,21 @@ export class CurveEditor {
     this.autoBtn.textContent = 'Smooth';
     this.autoBtn.title = `Smooth — reset ${name} tangents to auto-smoothed`;
     this.autoBtn.setAttribute('aria-label', `Smooth — ${name} tangents`);
+    this.leftBtn = document.createElement('button');
+    this.leftBtn.type = 'button';
+    this.leftBtn.className = 'btn btn-small';
+    this.leftBtn.textContent = '←';
+    this.leftBtn.setAttribute('aria-label', `Nudge ${name} key left`);
+    this.rightBtn = document.createElement('button');
+    this.rightBtn.type = 'button';
+    this.rightBtn.className = 'btn btn-small';
+    this.rightBtn.textContent = '→';
+    this.rightBtn.setAttribute('aria-label', `Nudge ${name} key right`);
+    this.addBtn = document.createElement('button');
+    this.addBtn.type = 'button';
+    this.addBtn.className = 'btn btn-small';
+    this.addBtn.textContent = '+ Key';
+    this.addBtn.setAttribute('aria-label', `Add ${name} key`);
     this.delBtn = document.createElement('button');
     this.delBtn.type = 'button';
     this.delBtn.className = 'btn btn-small btn-danger';
@@ -96,7 +137,8 @@ export class CurveEditor {
     this.hint = document.createElement('span');
     this.hint.className = 'curve-hint muted';
     this.hint.textContent = 'Double-click to add a point · drag handles for tangents';
-    tools.append(this.tIn, this.vIn, this.autoBtn, this.delBtn, this.hint);
+    tools.append(this.addBtn, this.tIn, this.vIn, this.leftBtn, this.rightBtn,
+      this.autoBtn, this.delBtn, this.hint);
     container.appendChild(tools);
 
     this.tIn.addEventListener('change', () => this._applyNumericEdit());
@@ -109,6 +151,25 @@ export class CurveEditor {
       this.draw();
       this.onChange?.();
     });
+    this.addBtn.addEventListener('click', () => {
+      const t = widestGapPosition(this.curve.keys);
+      const key = { t, v: evalCurve(this.curve, t) };
+      this.curve.keys.push(key);
+      sortCurve(this.curve);
+      this.selected = this.curve.keys.indexOf(key);
+      this._syncTools();
+      this.draw();
+      this.onChange?.();
+    });
+    const nudge = (delta) => {
+      if (this.selected === null) return;
+      this.selected = nudgePoint(this.curve.keys, this.selected, delta);
+      this._syncTools();
+      this.draw();
+      this.onChange?.();
+    };
+    this.leftBtn.addEventListener('click', () => nudge(-0.01));
+    this.rightBtn.addEventListener('click', () => nudge(0.01));
     this.delBtn.addEventListener('click', () => {
       if (this.selected === null || this.curve.keys.length <= 1) return;
       this.curve.keys.splice(this.selected, 1);
@@ -236,11 +297,14 @@ export class CurveEditor {
     const k = this.selected !== null ? this.curve.keys[this.selected] : null;
     const has = !!k;
     this.tIn.disabled = this.vIn.disabled = this.autoBtn.disabled = !has;
+    this.leftBtn.disabled = this.rightBtn.disabled = !has;
     this.delBtn.disabled = !has || this.curve.keys.length <= 1;
     this.hint.classList.toggle('hidden', has);
     this.tIn.classList.toggle('hidden', !has);
     this.vIn.classList.toggle('hidden', !has);
     this.autoBtn.classList.toggle('hidden', !has);
+    this.leftBtn.classList.toggle('hidden', !has);
+    this.rightBtn.classList.toggle('hidden', !has);
     this.delBtn.classList.toggle('hidden', !has);
     if (has && document.activeElement !== this.tIn && document.activeElement !== this.vIn) {
       this.tIn.value = +k.t.toFixed(3);
@@ -512,6 +576,29 @@ export class GradientEditor {
     this.colorInput.type = 'color';
     this.colorInput.className = 'gradient-color-input';
     this.colorInput.title = `${name} — colour of the selected stop`;
+    this.positionInput = document.createElement('input');
+    this.positionInput.type = 'number';
+    this.positionInput.inputMode = 'decimal';
+    this.positionInput.step = '0.01';
+    this.positionInput.min = '0';
+    this.positionInput.max = '1';
+    this.positionInput.className = 'num-in curve-num-in';
+    this.positionInput.title = `${name} — position of the selected stop`;
+    this.leftBtn = document.createElement('button');
+    this.leftBtn.type = 'button';
+    this.leftBtn.className = 'btn btn-small';
+    this.leftBtn.textContent = '←';
+    this.leftBtn.setAttribute('aria-label', `Nudge ${name} stop left`);
+    this.rightBtn = document.createElement('button');
+    this.rightBtn.type = 'button';
+    this.rightBtn.className = 'btn btn-small';
+    this.rightBtn.textContent = '→';
+    this.rightBtn.setAttribute('aria-label', `Nudge ${name} stop right`);
+    this.addBtn = document.createElement('button');
+    this.addBtn.type = 'button';
+    this.addBtn.className = 'btn btn-small';
+    this.addBtn.textContent = '+ Stop';
+    this.addBtn.setAttribute('aria-label', `Add ${name} stop`);
     this.info = document.createElement('span');
     this.info.className = 'gradient-stop-info';
     this.delBtn = document.createElement('button');
@@ -520,7 +607,8 @@ export class GradientEditor {
     this.delBtn.textContent = 'Remove stop';
     this.delBtn.title = `Remove stop — ${name}`;
     this.delBtn.setAttribute('aria-label', `Remove stop — ${name}`);
-    tools.append(this.colorInput, this.info, this.delBtn);
+    tools.append(this.addBtn, this.colorInput, this.positionInput, this.leftBtn,
+      this.rightBtn, this.info, this.delBtn);
     container.appendChild(tools);
 
     const applyColor = () => {
@@ -532,6 +620,31 @@ export class GradientEditor {
     };
     this.colorInput.addEventListener('input', applyColor);
     this.colorInput.addEventListener('change', applyColor);
+    this.positionInput.addEventListener('change', () => {
+      const stop = this.gradient.stops[this.selected];
+      if (!stop) return;
+      stop.t = clamp(+this.positionInput.value || 0, 0, 1);
+      sortGradient(this.gradient);
+      this.selected = this.gradient.stops.indexOf(stop);
+      this.draw();
+      this.onChange?.();
+    });
+    this.addBtn.addEventListener('click', () => {
+      const t = widestGapPosition(this.gradient.stops);
+      const stop = { t, c: evalGradient(this.gradient, t) };
+      this.gradient.stops.push(stop);
+      sortGradient(this.gradient);
+      this.selected = this.gradient.stops.indexOf(stop);
+      this.draw();
+      this.onChange?.();
+    });
+    const nudge = (delta) => {
+      this.selected = nudgePoint(this.gradient.stops, this.selected, delta);
+      this.draw();
+      this.onChange?.();
+    };
+    this.leftBtn.addEventListener('click', () => nudge(-0.01));
+    this.rightBtn.addEventListener('click', () => nudge(0.01));
 
     this.delBtn.addEventListener('click', () => {
       if (this.gradient.stops.length <= 1) return;
@@ -550,6 +663,7 @@ export class GradientEditor {
     const s = this.gradient.stops[this.selected];
     if (!s) return;
     this.colorInput.value = linToHex(s.c);
+    if (document.activeElement !== this.positionInput) this.positionInput.value = s.t.toFixed(2);
     // showPicker() is the reliable path; click() is the older fallback.
     try { this.colorInput.showPicker(); } catch { this.colorInput.click(); }
   }

@@ -161,8 +161,9 @@ everything else works without them.
 - **Orbit** left-drag or one-finger drag · **pan** right/shift-drag or two-finger drag ·
   **zoom** wheel or pinch · **Space** play/pause
 - **Ctrl+Enter** in the shader editor compiles immediately (auto-compile is on by default)
-- Curve editors: drag keys, double-click to add, right-click to remove.
-  Gradient editor: double-click a stop to recolor, double-click empty space to add.
+- Curve editors: drag keys, double-click or use **+ Key** to add, and use the selected-key
+  controls for exact values, nudging, smoothing, or deletion. Gradient stops have matching
+  add, position, nudge, color, and remove controls, so neither editor requires a mouse.
 
 ## Hosting & the community backend
 

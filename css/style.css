@@ -278,6 +278,7 @@ input[type="checkbox"] { accent-color: var(--accent-2); width: 15px; height: 15p
   margin-top: 6px;
   flex-wrap: wrap;
 }
+.curve-tools .btn[aria-label^="Nudge"] { min-width: 34px; }
 .curve-num-in { width: 56px; }
 .curve-hint { font-size: 11px; }
 
