@@ -614,4 +614,49 @@ input[type="checkbox"] { accent-color: var(--accent-2); width: 15px; height: 15p
   #inspector .curve-holder { min-width: 0; }
   #viewport-overlay { bottom: 10px; }
   #toast { bottom: calc(62px + env(safe-area-inset-bottom)); max-width: 90vw; }
+
+  .modal-overlay {
+    align-items: flex-end;
+    padding: max(10px, env(safe-area-inset-top))
+      max(8px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom))
+      max(8px, env(safe-area-inset-left));
+  }
+  .modal-box,
+  .modal-wide {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100dvh - max(18px, env(safe-area-inset-top)));
+    border-radius: 12px 12px 8px 8px;
+  }
+  .modal-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    min-height: 52px;
+    background: var(--panel);
+    border-radius: 12px 12px 0 0;
+  }
+  .modal-head .btn-icon { min-width: 40px; min-height: 40px; }
+  .modal-body { padding: 12px; overscroll-behavior-y: contain; }
+  .modal-body .prop-row {
+    display: grid;
+    grid-template-columns: minmax(92px, 0.4fr) minmax(0, 1fr);
+    min-height: 42px;
+  }
+  .modal-body .prop-label { width: auto; }
+  .modal-body .prop-controls { min-width: 0; flex-wrap: wrap; }
+  .modal-body .text-in,
+  .modal-body .select-in,
+  .modal-body .obj-in { max-width: 100%; }
+  .modal-body .btn-row,
+  .lib-row { flex-wrap: wrap; }
+  .lib-row .lib-name { min-width: min(180px, 55vw); }
+  .share-url { min-height: 44px; }
+}
+
+@media (max-width: 760px) and (orientation: landscape) {
+  .modal-overlay { align-items: center; }
+  .modal-box,
+  .modal-wide { max-height: calc(100dvh - 12px); }
 }

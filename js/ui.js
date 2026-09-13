@@ -210,11 +210,21 @@ function section(parent, title, open = true) {
 export function modal(title, contentNode, { wide } = {}) {
   const root = document.getElementById('modal-root');
   root.innerHTML = '';
+  const previousFocus = document.activeElement;
   const overlay = el('div', 'modal-overlay');
   const box = el('div', 'modal-box' + (wide ? ' modal-wide' : ''));
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-modal', 'true');
   const head = el('div', 'modal-head');
-  head.appendChild(el('span', 'modal-title', title));
-  const close = btn('✕', () => overlay.remove(), 'btn btn-icon');
+  const titleEl = el('span', 'modal-title', title);
+  titleEl.id = `pt-modal-title-${++ctlSeq}`;
+  box.setAttribute('aria-labelledby', titleEl.id);
+  head.appendChild(titleEl);
+  const dismiss = () => {
+    overlay.remove();
+    if (previousFocus?.isConnected) previousFocus.focus();
+  };
+  const close = btn('✕', dismiss, 'btn btn-icon', `Close ${title}`);
   head.appendChild(close);
   box.appendChild(head);
   const body = el('div', 'modal-body');
@@ -222,8 +232,10 @@ export function modal(title, contentNode, { wide } = {}) {
   else body.appendChild(contentNode);
   box.appendChild(body);
   overlay.appendChild(box);
-  overlay.addEventListener('pointerdown', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.addEventListener('pointerdown', (e) => { if (e.target === overlay) dismiss(); });
+  overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') dismiss(); });
   root.appendChild(overlay);
+  queueMicrotask(() => close.focus());
   return { overlay, body };
 }
 
