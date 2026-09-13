@@ -117,6 +117,8 @@ Auto to adapt internal resolution gradually from measured frame time.
 - **Export / Import** — portable `.particletoy.json` files
 - **Presets** — Campfire, Magic Orb, Fountain, Confetti Burst, Smoke Plume,
   Boids (compute), blank starter
+- **AI Assist** — copy or download a provider-neutral Markdown brief containing the
+  current effect, schema, shader-language rules, and collaboration constraints
 
 **The community site** (accounts + gallery, backed by a free Supabase project):
 

@@ -22,6 +22,7 @@ import {
 import { setupMobileCommandBar, setupMobileWorkspace } from './mobile-layout.js';
 import { AdaptiveQuality, loadQualityMode, saveQualityMode } from './quality.js';
 import { registerPwa } from './pwa.js';
+import { buildEffectBrief } from './ai.js';
 
 void registerPwa();
 
@@ -467,6 +468,7 @@ function wireToolbar() {
       toast('Not a particletoy effect file');
     }
   });
+  document.getElementById('btn-ai').addEventListener('click', () => showAiBrief());
 
   document.getElementById('btn-save').addEventListener('click', async () => {
     await settleCompiles();
@@ -475,6 +477,47 @@ function wireToolbar() {
   });
   document.getElementById('btn-library').addEventListener('click', showLibrary);
   document.getElementById('btn-publish').addEventListener('click', showPublish);
+}
+
+function showAiBrief() {
+  const wrap = document.createElement('div');
+  wrap.className = 'ai-workspace';
+  const intro = document.createElement('p');
+  intro.className = 'muted';
+  intro.textContent = 'Copy this provider-neutral brief into an AI assistant. It includes the current effect, its schema, and the rules needed to return usable JSON.';
+  const brief = buildEffectBrief(currentData());
+  const text = document.createElement('textarea');
+  text.className = 'obj-in ai-brief';
+  text.readOnly = true;
+  text.value = brief;
+  text.setAttribute('aria-label', 'AI effect brief');
+  const actions = document.createElement('div');
+  actions.className = 'btn-row';
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'btn btn-accent';
+  copy.textContent = 'Copy brief';
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(brief);
+      toast('AI brief copied');
+    } catch {
+      text.focus();
+      text.select();
+      toast('Select and copy the brief');
+    }
+  });
+  const download = document.createElement('button');
+  download.type = 'button';
+  download.className = 'btn';
+  download.textContent = 'Download .md';
+  download.addEventListener('click', () => downloadBlob(
+    new Blob([brief], { type: 'text/markdown' }),
+    `${(app.name || 'effect').replace(/[^\w-]+/g, '_')}.particletoy-ai.md`,
+  ));
+  actions.append(copy, download);
+  wrap.append(intro, text, actions);
+  modal('AI Assist — Effect Brief', wrap, { wide: true });
 }
 
 function showLibrary() {
