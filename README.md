@@ -7,6 +7,8 @@ pipelines, and zero-infrastructure sharing.
 Built as a fully static web app: plain ES modules, WebGPU, no build step. Shaders are
 written in [Slang](https://shader-slang.org) and compiled to WGSL in the browser by a
 vendored copy of the Slang compiler (`js/vendor/slang`, 24 MB — the app's one dependency).
+The editor is installable; its same-origin shell works offline after the first visit,
+while account and community data remain network-backed.
 
 Try it at **[particletoy.com](https://particletoy.com/)** or jump straight into the
 **[editor](https://particletoy.com/editor.html)**.

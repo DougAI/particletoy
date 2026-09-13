@@ -5,6 +5,9 @@
 
 import * as api from './backend.js';
 import { EffectPlayer } from './player.js';
+import { registerPwa } from './pwa.js';
+
+void registerPwa();
 
 // ─── support links (shown on the front page — put your real URLs here) ──────
 export const LINKS = {

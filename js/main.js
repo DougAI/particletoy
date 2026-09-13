@@ -21,6 +21,9 @@ import {
 } from './exportmedia.js';
 import { setupMobileCommandBar, setupMobileWorkspace } from './mobile-layout.js';
 import { AdaptiveQuality, loadQualityMode, saveQualityMode } from './quality.js';
+import { registerPwa } from './pwa.js';
+
+void registerPwa();
 
 const mobileWorkspace = setupMobileWorkspace();
 const mobileCommandBar = setupMobileCommandBar();
