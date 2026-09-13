@@ -32,9 +32,9 @@ deployment, and include a focused automated or browser-level check.
    and the particletoy schema for use with any assistant.
 10. **Safe patch preview** — validate and display an AI-proposed effect patch before the
     user applies it; never execute arbitrary returned JavaScript.
-11. **Prompt workspace** — add an in-editor conversation surface that can operate in
+11. **Prompt workspace** ✅ — add an in-editor conversation surface that can operate in
     clipboard mode before any provider is configured.
-12. **Provider boundary** — define an optional server-side adapter contract so API keys
+12. **Provider boundary** ✅ — define an optional server-side adapter contract so API keys
     are never embedded in the static client or published effects.
 13. **Prompt-to-properties** — let assistants add and tune emitters through a constrained,
     versioned operation format.

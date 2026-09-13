@@ -23,6 +23,7 @@ import { setupMobileCommandBar, setupMobileWorkspace } from './mobile-layout.js'
 import { AdaptiveQuality, loadQualityMode, saveQualityMode } from './quality.js';
 import { registerPwa } from './pwa.js';
 import { applyAiPatch, buildAiRequest, buildEffectBrief, describeAiChanges, parseAiPatch } from './ai.js';
+import { requestAiPatch } from './ai-provider.js';
 
 void registerPwa();
 
@@ -605,9 +606,56 @@ function showAiBrief() {
     apply.classList.add('hidden');
     pending = null;
   });
+  const providerSection = document.createElement('details');
+  providerSection.className = 'section dialog-section';
+  const providerSummary = document.createElement('summary');
+  providerSummary.textContent = 'Optional secure provider';
+  const providerBody = document.createElement('div');
+  providerBody.className = 'section-body';
+  const providerIntro = document.createElement('p');
+  providerIntro.className = 'muted';
+  providerIntro.textContent = 'Enter a server-side adapter URL, never a model API key. The adapter returns the same validated patch used by clipboard mode.';
+  const endpoint = document.createElement('input');
+  endpoint.className = 'text-in';
+  endpoint.type = 'url';
+  endpoint.placeholder = 'https://your-server.example/particletoy-ai';
+  endpoint.value = localStorageRef?.getItem('particletoy.aiProviderEndpoint') || '';
+  endpoint.setAttribute('aria-label', 'AI provider endpoint');
+  const ask = document.createElement('button');
+  ask.type = 'button';
+  ask.className = 'btn';
+  ask.textContent = 'Ask provider';
+  ask.addEventListener('click', async () => {
+    let request;
+    try { request = buildAiRequest({ prompt: prompt.value, data: currentData() }); }
+    catch (error) { prompt.focus(); toast(error.message); return; }
+    ask.disabled = true;
+    ask.textContent = 'Waiting…';
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45_000);
+      let patch;
+      try {
+        patch = await requestAiPatch({ endpoint: endpoint.value, request, signal: controller.signal });
+      } finally { clearTimeout(timeout); }
+      localStorageRef?.setItem('particletoy.aiProviderEndpoint', endpoint.value.trim());
+      patchText.value = JSON.stringify(patch, null, 2);
+      preview.click();
+      patchSection.open = true;
+      patchSection.scrollIntoView({ block: 'nearest' });
+      toast('Provider patch is ready to review');
+    } catch (error) {
+      toast(error.name === 'AbortError' ? 'Provider request timed out' : error.message);
+    } finally {
+      ask.disabled = false;
+      ask.textContent = 'Ask provider';
+    }
+  });
+  providerBody.append(providerIntro, endpoint, ask);
+  providerSection.append(providerSummary, providerBody);
   patchBody.append(patchIntro, patchText, preview, result, apply);
   patchSection.append(patchSummary, patchBody);
-  wrap.append(intro, promptLabel, prompt, actions, thread, briefSection, patchSection);
+  wrap.append(intro, promptLabel, prompt, actions, thread, providerSection, briefSection, patchSection);
   modal('AI Assist', wrap, { wide: true });
 }
 
