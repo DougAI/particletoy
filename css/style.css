@@ -574,6 +574,43 @@ input[type="checkbox"] { accent-color: var(--accent-2); width: 15px; height: 15p
   }
 
   .btn, .seg-btn, .select-in, .text-in { min-height: 36px; }
+  #inspector {
+    scroll-padding-block: 12px 42vh;
+    overscroll-behavior-y: contain;
+  }
+  #inspector .section > summary {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  #inspector .section-body { padding: 10px 12px 14px; }
+  #inspector .emitter-item { min-height: 44px; }
+  #inspector .prop-row {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr);
+    align-items: center;
+    min-height: 42px;
+    margin: 7px 0;
+  }
+  #inspector .prop-controls { min-width: 0; }
+  #inspector .vec-wrap,
+  #inspector .slider-wrap { min-width: 0; flex-wrap: wrap; }
+  #inspector .num-in,
+  #inspector .select-in,
+  #inspector .text-in,
+  #inspector .color-in { min-height: 40px; }
+  #inspector .num-in { width: 72px; }
+  #inspector input[type="checkbox"] { width: 22px; height: 22px; }
+  #inspector input[type="range"] { min-height: 32px; }
+  #inspector input,
+  #inspector select,
+  #inspector textarea { scroll-margin-bottom: 42vh; }
+  #inspector .btn { min-height: 40px; }
+  #inspector .btn-icon { min-width: 40px; }
+  #inspector .material-head { min-height: 40px; gap: 8px; }
+  #inspector .curve-holder { min-width: 0; }
   #viewport-overlay { bottom: 10px; }
   #toast { bottom: calc(62px + env(safe-area-inset-bottom)); max-width: 90vw; }
 }

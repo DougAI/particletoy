@@ -71,11 +71,13 @@ export class CurveEditor {
     tools.className = 'curve-tools';
     this.tIn = document.createElement('input');
     this.tIn.type = 'number';
+    this.tIn.inputMode = 'decimal';
     this.tIn.step = '0.01';
     this.tIn.className = 'num-in curve-num-in';
     this.tIn.title = `${name} key position (life 0–1)`;
     this.vIn = document.createElement('input');
     this.vIn.type = 'number';
+    this.vIn.inputMode = 'decimal';
     this.vIn.step = '0.01';
     this.vIn.className = 'num-in curve-num-in';
     this.vIn.title = `${name} key value`;

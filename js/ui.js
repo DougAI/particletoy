@@ -87,6 +87,7 @@ function row(label, ...controls) {
 function numIn(v, onCh, { step = 0.1, min, max, w } = {}) {
   const i = el('input', 'num-in');
   i.type = 'number';
+  i.inputMode = 'decimal';
   i.step = step;
   if (min !== undefined) i.min = min;
   if (max !== undefined) i.max = max;
