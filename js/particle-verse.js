@@ -126,6 +126,15 @@ export class ParticleVerseRuntime {
 
   enqueue(handler) { this.tasks.push({ handler, pc: 0, wake: this.time }); }
 
+  emit(event) {
+    const name = String(event || '');
+    if (!name || name.length > 64) throw new Error('Particle Verse event names must be 1–64 characters');
+    const handlers = this.handlers('OnEvent', name);
+    if (this.tasks.length + handlers.length > 128) throw new Error('Particle Verse task limit of 128 exceeded');
+    for (const handler of handlers) this.enqueue(handler);
+    return handlers.length;
+  }
+
   restart() {
     this.time = 0;
     this.tasks = [];
@@ -166,7 +175,14 @@ export class ParticleVerseRuntime {
           yielded = true;
           break;
         }
-        this.dispatch({ namespace: statement.namespace || statement.type, method: statement.method || statement.type, args, line: statement.line });
+        try {
+          if (statement.type === 'Emit') this.emit(args[0]);
+          else this.dispatch({ namespace: statement.namespace || statement.type, method: statement.method || statement.type, args, line: statement.line });
+        } catch (error) {
+          this.lastError = { line: statement.line, column: 1, message: error.message || String(error) };
+          this.tasks = [];
+          return { instructions, error: this.lastError };
+        }
       }
       if (task.pc >= task.handler.body.length) this.tasks.splice(i, 1);
       else if (yielded) i++;

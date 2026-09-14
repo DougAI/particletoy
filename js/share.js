@@ -8,7 +8,7 @@ const STORAGE_KEY = 'particletoy.library.v1';
 // and says so rather than showing a black canvas.
 export const SCHEMA_VERSION = 2;
 
-export function serializeState(effectName, emitters, materials, scene, wgslCache) {
+export function serializeState(effectName, emitters, materials, scene, wgslCache, script = '') {
   const out = {
     v: SCHEMA_VERSION,
     shaderLang: 'slang',
@@ -21,6 +21,7 @@ export function serializeState(effectName, emitters, materials, scene, wgslCache
   // open in the editor, which has the compiler, and carrying compiled WGSL
   // would bloat a ~2 KB link several-fold.
   if (wgslCache) out.wgslCache = wgslCache;
+  if (script) out.script = String(script);
   return out;
 }
 

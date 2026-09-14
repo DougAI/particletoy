@@ -57,7 +57,7 @@ subset**, not false claims of full UEFN compatibility.
     restart semantics, instruction budgets, and deterministic time.
 19. **Scene and emitter API** ✅ — expose allow-listed lighting, playback, emitter, and burst
     operations through undoable editor state.
-20. **Events, examples, compatibility** — add bounded coroutines/events, presets, reference
+20. **Events, examples, compatibility** ✅ — add bounded coroutines/events, presets, reference
     documentation, serialization tests, and an explicit compatibility matrix against Epic
     Verse syntax and semantics.
 

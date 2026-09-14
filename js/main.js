@@ -30,6 +30,7 @@ import {
 } from './ai-workflows.js';
 import { formatVerseDiagnostics, parseParticleVerse, ParticleVerseRuntime } from './particle-verse.js';
 import { ParticleVerseHost } from './particle-verse-host.js';
+import { PARTICLE_VERSE_EXAMPLES } from './particle-verse-examples.js';
 
 void registerPwa();
 
@@ -247,9 +248,7 @@ function currentData({ withCache = false } = {}) {
   const cache = withCache
     ? buildCache(app.materials, app.materialRuntimes, app.emitters)
     : null;
-  const data = serializeState(app.name, app.emitters, app.materials.map(serializeMaterial), app.scene, cache);
-  if (app.script) data.script = app.script;
-  return data;
+  return serializeState(app.name, app.emitters, app.materials.map(serializeMaterial), app.scene, cache, app.script);
 }
 
 // A frame, or a quarter second — whichever lands first. Compiles are kicked
@@ -522,6 +521,23 @@ function showVerseEditor() {
   source.setAttribute('aria-label', 'Particle Verse source');
   source.spellcheck = false;
   source.value = app.script || `particle_verse := 1\n\nOnBegin():void=\n    Scene.SetBloom(1.2)\n`;
+  const examples = document.createElement('select');
+  examples.className = 'select-in';
+  examples.setAttribute('aria-label', 'Particle Verse example');
+  const examplePlaceholder = document.createElement('option');
+  examplePlaceholder.value = '';
+  examplePlaceholder.textContent = 'Load example…';
+  examples.append(examplePlaceholder);
+  for (const [name, example] of Object.entries(PARTICLE_VERSE_EXAMPLES)) {
+    const option = document.createElement('option');
+    option.value = example;
+    option.textContent = name;
+    examples.append(option);
+  }
+  examples.addEventListener('change', () => {
+    if (examples.value) source.value = examples.value;
+    examples.value = '';
+  });
   const diagnostics = document.createElement('pre');
   diagnostics.className = 'ai-patch-preview';
   const actions = document.createElement('div');
@@ -557,7 +573,7 @@ function showVerseEditor() {
     diagnostics.textContent = 'Script disabled. Use Undo to restore it.';
   });
   actions.append(run, disable);
-  wrap.append(note, source, actions, diagnostics);
+  wrap.append(note, examples, source, actions, diagnostics);
   modal('Particle Verse', wrap, { wide: true });
 }
 
