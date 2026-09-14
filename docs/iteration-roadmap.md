@@ -40,7 +40,7 @@ deployment, and include a focused automated or browser-level check.
     versioned operation format.
 14. **Prompt-to-material** ✅ — generate Slang vertex/fragment changes with compilation
     diagnostics and an explicit accept/reject step.
-15. **Prompt-to-simulation** — generate compute simulation changes with capacity and
+15. **Prompt-to-simulation** ✅ — generate compute simulation changes with capacity and
     performance guards.
 16. **Repair loop** — feed structured compiler/runtime diagnostics back into an assistant
     while preserving undo, diffs, and user approval.

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildWorkflowRequest, collectAiDiagnostics, validateWorkflowPatch } from './ai-workflows.js';
+import { assessSimulationBudget, buildWorkflowRequest, collectAiDiagnostics, validateWorkflowPatch } from './ai-workflows.js';
 
 const effect = {
   v: 2, shaderLang: 'slang', name: 'Test', scene: { bloom: 1 },
@@ -20,6 +20,11 @@ const simPatch = { version: 1, operations: [
   { op: 'replace', path: '/emitters/0/simMode', value: 'shader' },
 ] };
 assert.equal(validateWorkflowPatch(effect, simPatch, 'simulation').effect.emitters[0].simMode, 'shader');
+assert.equal(assessSimulationBudget(effect).particles, 1000);
+assert.throws(() => assessSimulationBudget({ emitters: [{ id: 'x', spawn: { max: 1 }, fields: [
+  { name: 'a', type: 'vec4' }, { name: 'b', type: 'vec4' }, { name: 'c', type: 'vec4' },
+  { name: 'd', type: 'vec4' }, { name: 'e', type: 'f32' },
+]}] }), /16 custom/);
 
 const diagnostics = collectAiDiagnostics({
   materialErrors: new Map([['mat1', [{ stage: 'fragment', line: 4, msg: 'unknown glow' }]]]),

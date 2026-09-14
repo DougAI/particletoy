@@ -13,6 +13,30 @@ const CODE_LIMIT = 64 * 1024;
 const PROPERTY_BLOCKED = /\/(vertexSrc|fragmentSrc|simSrc)(?:\/|$)/;
 const MATERIAL_PATH = /^\/materials\/(\d+)\/(vertexSrc|fragmentSrc)$/;
 const SIM_PATH = /^\/emitters\/(\d+)\/(simSrc|simMode|fields|spawn\/max)$/;
+const FIELD_WIDTH = Object.freeze({ f32: 1, vec2: 2, vec3: 3, vec4: 4 });
+
+export function assessSimulationBudget(effect) {
+  let particles = 0;
+  let estimatedBytes = 0;
+  const warnings = [];
+  for (const emitter of effect.emitters || []) {
+    const max = Number(emitter.spawn?.max ?? 0);
+    particles += max;
+    let customFloats = 0;
+    const names = new Set();
+    for (const field of emitter.fields || []) {
+      if (!field?.name || names.has(field.name) || !(field.type in FIELD_WIDTH)) {
+        throw new Error(`Emitter ${emitter.id} has invalid or duplicate simulation fields`);
+      }
+      names.add(field.name);
+      customFloats += FIELD_WIDTH[field.type];
+    }
+    if (customFloats > 16) throw new Error(`Emitter ${emitter.id} exceeds 16 custom simulation floats`);
+    estimatedBytes += max * (64 + customFloats * 4);
+    if (Number(emitter.spawn?.rate || 0) > max * 2) warnings.push(`${emitter.id}: spawn rate may saturate capacity in under 0.5 seconds`);
+  }
+  return { particles, estimatedBytes, warnings };
+}
 
 export function preflightShaderChanges(changes) {
   const diagnostics = [];
@@ -101,9 +125,10 @@ export function validateWorkflowPatch(effect, patch, workflow = 'properties') {
   if (workflow === 'simulation' && capacity > 250_000) {
     throw new Error('Combined particle capacity exceeds the AI workflow safety budget of 250,000');
   }
+  const simulationBudget = assessSimulationBudget(result.effect);
   const preflight = preflightShaderChanges(result.changes);
   if (preflight.some((item) => item.severity === 'error')) {
     throw new Error(preflight.map((item) => `${item.path}: ${item.message}`).join('; '));
   }
-  return { ...result, workflow, capacity, preflight };
+  return { ...result, workflow, capacity, simulationBudget, preflight };
 }
