@@ -51,7 +51,7 @@ Epic does not currently ship its Verse compiler/runtime as a standalone browser
 dependency. These milestones therefore target a clearly documented **Particle Verse
 subset**, not false claims of full UEFN compatibility.
 
-17. **Parser and diagnostics** — parse a versioned, indentation-sensitive Verse-shaped
+17. **Parser and diagnostics** ✅ — parse a versioned, indentation-sensitive Verse-shaped
     subset into an AST without `eval`, with useful line/column errors.
 18. **Deterministic lifecycle** — add bounded `OnBegin` and per-frame execution with
     restart semantics, instruction budgets, and deterministic time.
