@@ -55,7 +55,7 @@ subset**, not false claims of full UEFN compatibility.
     subset into an AST without `eval`, with useful line/column errors.
 18. **Deterministic lifecycle** ✅ — add bounded `OnBegin` and per-frame execution with
     restart semantics, instruction budgets, and deterministic time.
-19. **Scene and emitter API** — expose allow-listed lighting, playback, emitter, and burst
+19. **Scene and emitter API** ✅ — expose allow-listed lighting, playback, emitter, and burst
     operations through undoable editor state.
 20. **Events, examples, compatibility** — add bounded coroutines/events, presets, reference
     documentation, serialization tests, and an explicit compatibility matrix against Epic

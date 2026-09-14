@@ -28,6 +28,8 @@ import {
   AI_WORKFLOWS, buildWorkflowRequest, collectAiDiagnostics, recommendedRepairWorkflow,
   validateWorkflowPatch,
 } from './ai-workflows.js';
+import { formatVerseDiagnostics, parseParticleVerse, ParticleVerseRuntime } from './particle-verse.js';
+import { ParticleVerseHost } from './particle-verse-host.js';
 
 void registerPwa();
 
@@ -94,6 +96,7 @@ const app = {
   time: 0,
   materialRuntimes: new Map(),
   simErrors: new Map(),
+  script: '',
   markLut(em) { em.lutDirty = true; },
   markMaterial(id) {
     const rt = app.materialRuntimes.get(id);
@@ -200,6 +203,8 @@ function applyData(obj) {
   app.materialRuntimes.clear();
   app.materialErrors.clear();
   app.simErrors.clear();
+  verseRuntime = null;
+  app.script = typeof obj.script === 'string' ? obj.script : '';
 
   // Effects saved before the Slang cutover hold WGSL, which this engine can no
   // longer compile. Everything except the shaders still loads — emitters,
@@ -223,6 +228,8 @@ function applyData(obj) {
   app.selEmitter = 0;
   document.getElementById('fx-name').value = app.name;
   restart();
+  const verseLoad = loadVerseRuntime();
+  if (verseLoad.diagnostics.length) toast(`Particle Verse: ${verseLoad.diagnostics[0].message}`, 8000);
   app.refreshUI();
   const first = app.materials[0];
   if (first) editorPanel.show(first.id, 'fs');
@@ -240,7 +247,9 @@ function currentData({ withCache = false } = {}) {
   const cache = withCache
     ? buildCache(app.materials, app.materialRuntimes, app.emitters)
     : null;
-  return serializeState(app.name, app.emitters, app.materials.map(serializeMaterial), app.scene, cache);
+  const data = serializeState(app.name, app.emitters, app.materials.map(serializeMaterial), app.scene, cache);
+  if (app.script) data.script = app.script;
+  return data;
 }
 
 // A frame, or a quarter second — whichever lands first. Compiles are kicked
@@ -308,6 +317,23 @@ const history = new History({
 setHistoryRecorder((source) => history.record(source));
 window.__particletoy.history = history;
 
+let verseRuntime = null;
+const verseHost = new ParticleVerseHost(app);
+function loadVerseRuntime() {
+  verseRuntime = null;
+  if (!app.script.trim()) return { diagnostics: [] };
+  const parsed = parseParticleVerse(app.script);
+  if (!parsed.ast) return parsed;
+  verseRuntime = new ParticleVerseRuntime(parsed.ast, {
+    dispatch: (call) => verseHost.dispatch(call),
+    instructionBudget: 500,
+  });
+  const result = verseRuntime.restart();
+  if (result.error) return { ast: parsed.ast, diagnostics: [result.error] };
+  return parsed;
+}
+window.__particletoy.verse = { parse: parseParticleVerse, get runtime() { return verseRuntime; } };
+
 window.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   const key = e.key.toLowerCase();
@@ -326,6 +352,7 @@ window.addEventListener('keydown', (e) => {
 function restart() {
   app.time = 0;
   for (const em of app.emitters) em.restart();
+  if (verseRuntime) verseRuntime.restart();
 }
 
 // ---------------------------------------------------------------- materials
@@ -474,6 +501,7 @@ function wireToolbar() {
     }
   });
   document.getElementById('btn-ai').addEventListener('click', () => showAiBrief());
+  document.getElementById('btn-script').addEventListener('click', showVerseEditor);
 
   document.getElementById('btn-save').addEventListener('click', async () => {
     await settleCompiles();
@@ -482,6 +510,55 @@ function wireToolbar() {
   });
   document.getElementById('btn-library').addEventListener('click', showLibrary);
   document.getElementById('btn-publish').addEventListener('click', showPublish);
+}
+
+function showVerseEditor() {
+  const wrap = document.createElement('div');
+  const note = document.createElement('p');
+  note.className = 'muted';
+  note.textContent = 'Particle Verse subset v1 — sandboxed scene and emitter scripting. This is not Epic Verse or a UEFN runtime.';
+  const source = document.createElement('textarea');
+  source.className = 'obj-in ai-patch';
+  source.setAttribute('aria-label', 'Particle Verse source');
+  source.spellcheck = false;
+  source.value = app.script || `particle_verse := 1\n\nOnBegin():void=\n    Scene.SetBloom(1.2)\n`;
+  const diagnostics = document.createElement('pre');
+  diagnostics.className = 'ai-patch-preview';
+  const actions = document.createElement('div');
+  actions.className = 'btn-row';
+  const run = document.createElement('button');
+  run.type = 'button';
+  run.className = 'btn btn-accent';
+  run.textContent = 'Apply & restart';
+  run.addEventListener('click', () => {
+    const parsed = parseParticleVerse(source.value);
+    if (!parsed.ast) {
+      diagnostics.textContent = formatVerseDiagnostics(parsed.diagnostics);
+      return;
+    }
+    history.record(run);
+    app.script = source.value;
+    const loaded = loadVerseRuntime();
+    history.flush();
+    diagnostics.textContent = loaded.diagnostics.length
+      ? formatVerseDiagnostics(loaded.diagnostics)
+      : 'Running. Script source and changes are undoable.';
+    app.refreshUI();
+  });
+  const disable = document.createElement('button');
+  disable.type = 'button';
+  disable.className = 'btn';
+  disable.textContent = 'Disable script';
+  disable.addEventListener('click', () => {
+    history.record(disable);
+    app.script = '';
+    verseRuntime = null;
+    history.flush();
+    diagnostics.textContent = 'Script disabled. Use Undo to restore it.';
+  });
+  actions.append(run, disable);
+  wrap.append(note, source, actions, diagnostics);
+  modal('Particle Verse', wrap, { wide: true });
 }
 
 function showAiBrief() {
@@ -1204,6 +1281,13 @@ function frame(now) {
   if (app.playing) {
     const dt = rawDt * app.timeScale;
     app.time += dt;
+    if (verseRuntime) {
+      const verseResult = verseRuntime.tick(dt);
+      if (verseResult.error) {
+        toast(`Particle Verse stopped at line ${verseResult.error.line}: ${verseResult.error.message}`, 8000);
+        verseRuntime = null;
+      }
+    }
     for (const em of app.emitters) em.step(dt);
   }
 
