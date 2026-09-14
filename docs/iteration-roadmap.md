@@ -38,7 +38,7 @@ deployment, and include a focused automated or browser-level check.
     are never embedded in the static client or published effects.
 13. **Prompt-to-properties** ✅ — let assistants add and tune emitters through a constrained,
     versioned operation format.
-14. **Prompt-to-material** — generate Slang vertex/fragment changes with compilation
+14. **Prompt-to-material** ✅ — generate Slang vertex/fragment changes with compilation
     diagnostics and an explicit accept/reject step.
 15. **Prompt-to-simulation** — generate compute simulation changes with capacity and
     performance guards.

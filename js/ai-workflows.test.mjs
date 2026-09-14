@@ -10,7 +10,9 @@ const op = (path, value) => ({ version: 1, operations: [{ op: 'replace', path, v
 
 assert.equal(validateWorkflowPatch(effect, op('/scene/bloom', 2), 'properties').effect.scene.bloom, 2);
 assert.throws(() => validateWorkflowPatch(effect, op('/materials/0/fragmentSrc', 'x'), 'properties'), /cannot edit/);
-assert.equal(validateWorkflowPatch(effect, op('/materials/0/fragmentSrc', 'new fs'), 'material').effect.materials[0].fragmentSrc, 'new fs');
+const materialSrc = 'void mainSurface(inout Surface s, SurfaceInput i) {}';
+assert.equal(validateWorkflowPatch(effect, op('/materials/0/fragmentSrc', materialSrc), 'material').effect.materials[0].fragmentSrc, materialSrc);
+assert.throws(() => validateWorkflowPatch(effect, op('/materials/0/fragmentSrc', 'broken {'), 'material'), /Unbalanced|Missing/);
 assert.throws(() => validateWorkflowPatch(effect, op('/scene/bloom', 2), 'material'), /out-of-scope/);
 assert.throws(() => validateWorkflowPatch(effect, op('/emitters/0/spawn/max', 100001), 'simulation'), /capacity/);
 const simPatch = { version: 1, operations: [

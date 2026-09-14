@@ -14,6 +14,27 @@ const PROPERTY_BLOCKED = /\/(vertexSrc|fragmentSrc|simSrc)(?:\/|$)/;
 const MATERIAL_PATH = /^\/materials\/(\d+)\/(vertexSrc|fragmentSrc)$/;
 const SIM_PATH = /^\/emitters\/(\d+)\/(simSrc|simMode|fields|spawn\/max)$/;
 
+export function preflightShaderChanges(changes) {
+  const diagnostics = [];
+  for (const change of changes || []) {
+    const match = String(change.path).match(/\/(vertexSrc|fragmentSrc|simSrc)$/);
+    if (!match || typeof change.after !== 'string') continue;
+    const source = change.after;
+    const expected = { vertexSrc: 'mainVertex', fragmentSrc: 'mainSurface', simSrc: 'simulate' }[match[1]];
+    let depth = 0;
+    for (const char of source) {
+      if (char === '{') depth++;
+      if (char === '}') depth--;
+      if (depth < 0) break;
+    }
+    if (depth !== 0) diagnostics.push({ path: change.path, severity: 'error', message: 'Unbalanced braces' });
+    if (!new RegExp(`\\b${expected}\\s*\\(`).test(source)) {
+      diagnostics.push({ path: change.path, severity: 'error', message: `Missing required ${expected}(...) function` });
+    }
+  }
+  return diagnostics;
+}
+
 export function collectAiDiagnostics(app) {
   const out = [];
   for (const [id, errors] of app.materialErrors || []) {
@@ -80,5 +101,9 @@ export function validateWorkflowPatch(effect, patch, workflow = 'properties') {
   if (workflow === 'simulation' && capacity > 250_000) {
     throw new Error('Combined particle capacity exceeds the AI workflow safety budget of 250,000');
   }
-  return { ...result, workflow, capacity };
+  const preflight = preflightShaderChanges(result.changes);
+  if (preflight.some((item) => item.severity === 'error')) {
+    throw new Error(preflight.map((item) => `${item.path}: ${item.message}`).join('; '));
+  }
+  return { ...result, workflow, capacity, preflight };
 }
