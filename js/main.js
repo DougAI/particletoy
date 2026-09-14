@@ -22,8 +22,11 @@ import {
 import { setupMobileCommandBar, setupMobileWorkspace } from './mobile-layout.js';
 import { AdaptiveQuality, loadQualityMode, saveQualityMode } from './quality.js';
 import { registerPwa } from './pwa.js';
-import { applyAiPatch, buildAiRequest, buildEffectBrief, describeAiChanges, parseAiPatch } from './ai.js';
+import { buildEffectBrief, describeAiChanges, parseAiPatch } from './ai.js';
 import { requestAiPatch } from './ai-provider.js';
+import {
+  AI_WORKFLOWS, buildWorkflowRequest, collectAiDiagnostics, validateWorkflowPatch,
+} from './ai-workflows.js';
 
 void registerPwa();
 
@@ -494,6 +497,15 @@ function showAiBrief() {
   prompt.className = 'obj-in ai-prompt';
   prompt.placeholder = 'Make the sparks rise more slowly and fade from warm gold to deep red.';
   prompt.setAttribute('aria-label', 'AI edit request');
+  const workflow = document.createElement('select');
+  workflow.className = 'select-in ai-workflow';
+  workflow.setAttribute('aria-label', 'AI workflow');
+  for (const [value, label] of Object.entries(AI_WORKFLOWS)) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    workflow.append(option);
+  }
   const thread = document.createElement('div');
   thread.className = 'ai-thread';
   thread.setAttribute('aria-live', 'polite');
@@ -511,7 +523,10 @@ function showAiBrief() {
   copy.addEventListener('click', async () => {
     let request;
     try {
-      request = buildAiRequest({ prompt: prompt.value, data: currentData() });
+      request = buildWorkflowRequest({
+        workflow: workflow.value, prompt: prompt.value, data: currentData(),
+        diagnostics: collectAiDiagnostics(app),
+      });
     } catch (error) {
       prompt.focus();
       toast(error.message);
@@ -577,7 +592,7 @@ function showAiBrief() {
     try {
       const before = JSON.stringify(currentData());
       const patch = parseAiPatch(patchText.value);
-      const patched = applyAiPatch(JSON.parse(before), patch);
+      const patched = validateWorkflowPatch(JSON.parse(before), patch, workflow.value);
       result.textContent = `${patch.summary || 'AI patch'}\n\n${describeAiChanges(patched.changes)}`;
       const message = document.createElement('div');
       message.className = 'ai-message ai-message-assistant';
@@ -627,7 +642,12 @@ function showAiBrief() {
   ask.textContent = 'Ask provider';
   ask.addEventListener('click', async () => {
     let request;
-    try { request = buildAiRequest({ prompt: prompt.value, data: currentData() }); }
+    try {
+      request = buildWorkflowRequest({
+        workflow: workflow.value, prompt: prompt.value, data: currentData(),
+        diagnostics: collectAiDiagnostics(app),
+      });
+    }
     catch (error) { prompt.focus(); toast(error.message); return; }
     ask.disabled = true;
     ask.textContent = 'Waiting…';
@@ -655,7 +675,7 @@ function showAiBrief() {
   providerSection.append(providerSummary, providerBody);
   patchBody.append(patchIntro, patchText, preview, result, apply);
   patchSection.append(patchSummary, patchBody);
-  wrap.append(intro, promptLabel, prompt, actions, thread, providerSection, briefSection, patchSection);
+  wrap.append(intro, workflow, promptLabel, prompt, actions, thread, providerSection, briefSection, patchSection);
   modal('AI Assist', wrap, { wide: true });
 }
 

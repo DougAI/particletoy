@@ -4,7 +4,7 @@
 export const AI_BRIEF_VERSION = 1;
 export const AI_PATCH_VERSION = 1;
 const BLOCKED_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
-const ALLOWED_ROOTS = new Set(['name', 'scene', 'emitters', 'materials']);
+const ALLOWED_ROOTS = new Set(['name', 'scene', 'emitters', 'materials', 'script']);
 
 export function effectForAi(data) {
   const effect = structuredClone(data);
