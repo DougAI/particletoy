@@ -78,6 +78,12 @@ export function formatAiDiagnostics(items) {
   });
 }
 
+export function recommendedRepairWorkflow(items) {
+  const diagnostics = items || [];
+  if (!diagnostics.length) return null;
+  return diagnostics.some((item) => item.kind === 'simulation') ? 'simulation' : 'material';
+}
+
 export function buildWorkflowRequest({ workflow = 'properties', prompt, data, diagnostics = [] }) {
   if (!(workflow in AI_WORKFLOWS)) throw new Error(`Unknown AI workflow: ${workflow}`);
   const scope = {

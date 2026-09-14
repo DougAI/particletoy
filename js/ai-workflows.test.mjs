@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { assessSimulationBudget, buildWorkflowRequest, collectAiDiagnostics, validateWorkflowPatch } from './ai-workflows.js';
+import {
+  assessSimulationBudget, buildWorkflowRequest, collectAiDiagnostics,
+  recommendedRepairWorkflow, validateWorkflowPatch,
+} from './ai-workflows.js';
 
 const effect = {
   v: 2, shaderLang: 'slang', name: 'Test', scene: { bloom: 1 },
@@ -31,4 +34,7 @@ const diagnostics = collectAiDiagnostics({
   simErrors: new Map(),
 });
 assert.match(buildWorkflowRequest({ workflow: 'repair', prompt: 'Fix it', data: effect, diagnostics }), /unknown glow/);
+assert.equal(recommendedRepairWorkflow(diagnostics), 'material');
+assert.equal(recommendedRepairWorkflow([{ kind: 'simulation', msg: 'bad compute' }]), 'simulation');
+assert.equal(recommendedRepairWorkflow([]), null);
 console.log('AI scoped workflows: ok');

@@ -25,7 +25,8 @@ import { registerPwa } from './pwa.js';
 import { buildEffectBrief, describeAiChanges, parseAiPatch } from './ai.js';
 import { requestAiPatch } from './ai-provider.js';
 import {
-  AI_WORKFLOWS, buildWorkflowRequest, collectAiDiagnostics, validateWorkflowPatch,
+  AI_WORKFLOWS, buildWorkflowRequest, collectAiDiagnostics, recommendedRepairWorkflow,
+  validateWorkflowPatch,
 } from './ai-workflows.js';
 
 void registerPwa();
@@ -506,6 +507,17 @@ function showAiBrief() {
     option.textContent = label;
     workflow.append(option);
   }
+  const liveDiagnostics = collectAiDiagnostics(app);
+  const repairKind = recommendedRepairWorkflow(liveDiagnostics);
+  const diagnosticNote = document.createElement('p');
+  diagnosticNote.className = 'muted ai-diagnostics';
+  diagnosticNote.textContent = liveDiagnostics.length
+    ? `${liveDiagnostics.length} current compiler diagnostic${liveDiagnostics.length === 1 ? '' : 's'} available to the Repair workflow.`
+    : 'No current compiler diagnostics.';
+  if (repairKind) {
+    workflow.value = 'repair';
+    prompt.value = `Repair the current ${repairKind} compiler diagnostics with the smallest safe source change.`;
+  }
   const thread = document.createElement('div');
   thread.className = 'ai-thread';
   thread.setAttribute('aria-live', 'polite');
@@ -675,7 +687,7 @@ function showAiBrief() {
   providerSection.append(providerSummary, providerBody);
   patchBody.append(patchIntro, patchText, preview, result, apply);
   patchSection.append(patchSummary, patchBody);
-  wrap.append(intro, workflow, promptLabel, prompt, actions, thread, providerSection, briefSection, patchSection);
+  wrap.append(intro, workflow, diagnosticNote, promptLabel, prompt, actions, thread, providerSection, briefSection, patchSection);
   modal('AI Assist', wrap, { wide: true });
 }
 

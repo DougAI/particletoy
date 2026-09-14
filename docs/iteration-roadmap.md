@@ -42,7 +42,7 @@ deployment, and include a focused automated or browser-level check.
     diagnostics and an explicit accept/reject step.
 15. **Prompt-to-simulation** ✅ — generate compute simulation changes with capacity and
     performance guards.
-16. **Repair loop** — feed structured compiler/runtime diagnostics back into an assistant
+16. **Repair loop** ✅ — feed structured compiler/runtime diagnostics back into an assistant
     while preserving undo, diffs, and user approval.
 
 ## Particle Verse scene scripting
