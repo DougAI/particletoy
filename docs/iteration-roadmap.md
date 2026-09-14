@@ -53,7 +53,7 @@ subset**, not false claims of full UEFN compatibility.
 
 17. **Parser and diagnostics** ✅ — parse a versioned, indentation-sensitive Verse-shaped
     subset into an AST without `eval`, with useful line/column errors.
-18. **Deterministic lifecycle** — add bounded `OnBegin` and per-frame execution with
+18. **Deterministic lifecycle** ✅ — add bounded `OnBegin` and per-frame execution with
     restart semantics, instruction budgets, and deterministic time.
 19. **Scene and emitter API** — expose allow-listed lighting, playback, emitter, and burst
     operations through undoable editor state.

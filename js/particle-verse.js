@@ -103,3 +103,74 @@ export function parseParticleVerse(source) {
 export function formatVerseDiagnostics(diagnostics) {
   return diagnostics.map((item) => `${item.line}:${item.column} ${item.message}`).join('\n');
 }
+
+function valueOf(expression, time, delta) {
+  if (expression.type === 'Identifier') return expression.name === 'Time' ? time : delta;
+  return expression.value;
+}
+
+export class ParticleVerseRuntime {
+  constructor(ast, { dispatch = () => {}, instructionBudget = 500 } = {}) {
+    if (!ast || ast.type !== 'Program') throw new Error('Particle Verse runtime requires a parsed Program');
+    this.ast = ast;
+    this.dispatch = dispatch;
+    this.instructionBudget = Math.max(1, Math.min(10_000, instructionBudget | 0));
+    this.time = 0;
+    this.tasks = [];
+    this.lastError = null;
+  }
+
+  handlers(name, event = null) {
+    return this.ast.handlers.filter((item) => item.name === name && (name !== 'OnEvent' || item.event === event));
+  }
+
+  enqueue(handler) { this.tasks.push({ handler, pc: 0, wake: this.time }); }
+
+  restart() {
+    this.time = 0;
+    this.tasks = [];
+    this.lastError = null;
+    for (const handler of this.handlers('OnBegin')) this.enqueue(handler);
+    return this.run(0);
+  }
+
+  tick(delta) {
+    if (!Number.isFinite(delta) || delta < 0) throw new Error('Particle Verse delta must be a finite non-negative number');
+    this.time += delta;
+    for (const handler of this.handlers('OnTick')) this.enqueue(handler);
+    return this.run(delta);
+  }
+
+  run(delta) {
+    let instructions = 0;
+    for (let i = 0; i < this.tasks.length;) {
+      const task = this.tasks[i];
+      if (task.wake > this.time + 1e-9) { i++; continue; }
+      let yielded = false;
+      while (task.pc < task.handler.body.length) {
+        if (++instructions > this.instructionBudget) {
+          this.lastError = { line: task.handler.body[task.pc]?.line || task.handler.line, column: 1, message: `Instruction budget of ${this.instructionBudget} exceeded` };
+          this.tasks = [];
+          return { instructions, error: this.lastError };
+        }
+        const statement = task.handler.body[task.pc++];
+        const args = statement.args.map((arg) => valueOf(arg, this.time, delta));
+        if (statement.type === 'Wait') {
+          const seconds = Number(args[0]);
+          if (!Number.isFinite(seconds) || seconds < 0 || seconds > 60) {
+            this.lastError = { line: statement.line, column: 1, message: 'Wait must be between 0 and 60 seconds' };
+            this.tasks = [];
+            return { instructions, error: this.lastError };
+          }
+          task.wake = this.time + seconds;
+          yielded = true;
+          break;
+        }
+        this.dispatch({ namespace: statement.namespace || statement.type, method: statement.method || statement.type, args, line: statement.line });
+      }
+      if (task.pc >= task.handler.body.length) this.tasks.splice(i, 1);
+      else if (yielded) i++;
+    }
+    return { instructions, error: null };
+  }
+}
