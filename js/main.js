@@ -22,15 +22,6 @@ import {
 import { setupMobileCommandBar, setupMobileWorkspace } from './mobile-layout.js';
 import { AdaptiveQuality, loadQualityMode, saveQualityMode } from './quality.js';
 import { registerPwa } from './pwa.js';
-import { buildEffectBrief, describeAiChanges, parseAiPatch } from './ai.js';
-import { requestAiPatch } from './ai-provider.js';
-import {
-  AI_WORKFLOWS, buildWorkflowRequest, collectAiDiagnostics, recommendedRepairWorkflow,
-  validateWorkflowPatch,
-} from './ai-workflows.js';
-import { formatVerseDiagnostics, parseParticleVerse, ParticleVerseRuntime } from './particle-verse.js';
-import { ParticleVerseHost } from './particle-verse-host.js';
-import { PARTICLE_VERSE_EXAMPLES } from './particle-verse-examples.js';
 
 void registerPwa();
 
@@ -97,7 +88,6 @@ const app = {
   time: 0,
   materialRuntimes: new Map(),
   simErrors: new Map(),
-  script: '',
   markLut(em) { em.lutDirty = true; },
   markMaterial(id) {
     const rt = app.materialRuntimes.get(id);
@@ -204,8 +194,6 @@ function applyData(obj) {
   app.materialRuntimes.clear();
   app.materialErrors.clear();
   app.simErrors.clear();
-  verseRuntime = null;
-  app.script = typeof obj.script === 'string' ? obj.script : '';
 
   // Effects saved before the Slang cutover hold WGSL, which this engine can no
   // longer compile. Everything except the shaders still loads — emitters,
@@ -229,8 +217,6 @@ function applyData(obj) {
   app.selEmitter = 0;
   document.getElementById('fx-name').value = app.name;
   restart();
-  const verseLoad = loadVerseRuntime();
-  if (verseLoad.diagnostics.length) toast(`Particle Verse: ${verseLoad.diagnostics[0].message}`, 8000);
   app.refreshUI();
   const first = app.materials[0];
   if (first) editorPanel.show(first.id, 'fs');
@@ -248,7 +234,7 @@ function currentData({ withCache = false } = {}) {
   const cache = withCache
     ? buildCache(app.materials, app.materialRuntimes, app.emitters)
     : null;
-  return serializeState(app.name, app.emitters, app.materials.map(serializeMaterial), app.scene, cache, app.script);
+  return serializeState(app.name, app.emitters, app.materials.map(serializeMaterial), app.scene, cache);
 }
 
 // A frame, or a quarter second — whichever lands first. Compiles are kicked
@@ -316,23 +302,6 @@ const history = new History({
 setHistoryRecorder((source) => history.record(source));
 window.__particletoy.history = history;
 
-let verseRuntime = null;
-const verseHost = new ParticleVerseHost(app);
-function loadVerseRuntime() {
-  verseRuntime = null;
-  if (!app.script.trim()) return { diagnostics: [] };
-  const parsed = parseParticleVerse(app.script);
-  if (!parsed.ast) return parsed;
-  verseRuntime = new ParticleVerseRuntime(parsed.ast, {
-    dispatch: (call) => verseHost.dispatch(call),
-    instructionBudget: 500,
-  });
-  const result = verseRuntime.restart();
-  if (result.error) return { ast: parsed.ast, diagnostics: [result.error] };
-  return parsed;
-}
-window.__particletoy.verse = { parse: parseParticleVerse, get runtime() { return verseRuntime; } };
-
 window.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   const key = e.key.toLowerCase();
@@ -351,7 +320,6 @@ window.addEventListener('keydown', (e) => {
 function restart() {
   app.time = 0;
   for (const em of app.emitters) em.restart();
-  if (verseRuntime) verseRuntime.restart();
 }
 
 // ---------------------------------------------------------------- materials
@@ -499,8 +467,6 @@ function wireToolbar() {
       toast('Not a particletoy effect file');
     }
   });
-  document.getElementById('btn-ai').addEventListener('click', () => showAiBrief());
-  document.getElementById('btn-script').addEventListener('click', showVerseEditor);
 
   document.getElementById('btn-save').addEventListener('click', async () => {
     await settleCompiles();
@@ -509,279 +475,6 @@ function wireToolbar() {
   });
   document.getElementById('btn-library').addEventListener('click', showLibrary);
   document.getElementById('btn-publish').addEventListener('click', showPublish);
-}
-
-function showVerseEditor() {
-  const wrap = document.createElement('div');
-  const note = document.createElement('p');
-  note.className = 'muted';
-  note.textContent = 'Particle Verse subset v1 — sandboxed scene and emitter scripting. This is not Epic Verse or a UEFN runtime.';
-  const source = document.createElement('textarea');
-  source.className = 'obj-in ai-patch';
-  source.setAttribute('aria-label', 'Particle Verse source');
-  source.spellcheck = false;
-  source.value = app.script || `particle_verse := 1\n\nOnBegin():void=\n    Scene.SetBloom(1.2)\n`;
-  const examples = document.createElement('select');
-  examples.className = 'select-in';
-  examples.setAttribute('aria-label', 'Particle Verse example');
-  const examplePlaceholder = document.createElement('option');
-  examplePlaceholder.value = '';
-  examplePlaceholder.textContent = 'Load example…';
-  examples.append(examplePlaceholder);
-  for (const [name, example] of Object.entries(PARTICLE_VERSE_EXAMPLES)) {
-    const option = document.createElement('option');
-    option.value = example;
-    option.textContent = name;
-    examples.append(option);
-  }
-  examples.addEventListener('change', () => {
-    if (examples.value) source.value = examples.value;
-    examples.value = '';
-  });
-  const diagnostics = document.createElement('pre');
-  diagnostics.className = 'ai-patch-preview';
-  const actions = document.createElement('div');
-  actions.className = 'btn-row';
-  const run = document.createElement('button');
-  run.type = 'button';
-  run.className = 'btn btn-accent';
-  run.textContent = 'Apply & restart';
-  run.addEventListener('click', () => {
-    const parsed = parseParticleVerse(source.value);
-    if (!parsed.ast) {
-      diagnostics.textContent = formatVerseDiagnostics(parsed.diagnostics);
-      return;
-    }
-    history.record(run);
-    app.script = source.value;
-    const loaded = loadVerseRuntime();
-    history.flush();
-    diagnostics.textContent = loaded.diagnostics.length
-      ? formatVerseDiagnostics(loaded.diagnostics)
-      : 'Running. Script source and changes are undoable.';
-    app.refreshUI();
-  });
-  const disable = document.createElement('button');
-  disable.type = 'button';
-  disable.className = 'btn';
-  disable.textContent = 'Disable script';
-  disable.addEventListener('click', () => {
-    history.record(disable);
-    app.script = '';
-    verseRuntime = null;
-    history.flush();
-    diagnostics.textContent = 'Script disabled. Use Undo to restore it.';
-  });
-  actions.append(run, disable);
-  wrap.append(note, examples, source, actions, diagnostics);
-  modal('Particle Verse', wrap, { wide: true });
-}
-
-function showAiBrief() {
-  const wrap = document.createElement('div');
-  wrap.className = 'ai-workspace';
-  const intro = document.createElement('p');
-  intro.className = 'muted';
-  intro.textContent = 'Describe a change, copy the complete request into any AI assistant, then paste its operation document below. The effect never changes without preview and approval.';
-  const brief = buildEffectBrief(currentData());
-  const promptLabel = document.createElement('label');
-  promptLabel.className = 'prop-label';
-  promptLabel.textContent = 'What should change?';
-  const prompt = document.createElement('textarea');
-  prompt.className = 'obj-in ai-prompt';
-  prompt.placeholder = 'Make the sparks rise more slowly and fade from warm gold to deep red.';
-  prompt.setAttribute('aria-label', 'AI edit request');
-  const workflow = document.createElement('select');
-  workflow.className = 'select-in ai-workflow';
-  workflow.setAttribute('aria-label', 'AI workflow');
-  for (const [value, label] of Object.entries(AI_WORKFLOWS)) {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = label;
-    workflow.append(option);
-  }
-  const liveDiagnostics = collectAiDiagnostics(app);
-  const repairKind = recommendedRepairWorkflow(liveDiagnostics);
-  const diagnosticNote = document.createElement('p');
-  diagnosticNote.className = 'muted ai-diagnostics';
-  diagnosticNote.textContent = liveDiagnostics.length
-    ? `${liveDiagnostics.length} current compiler diagnostic${liveDiagnostics.length === 1 ? '' : 's'} available to the Repair workflow.`
-    : 'No current compiler diagnostics.';
-  if (repairKind) {
-    workflow.value = 'repair';
-    prompt.value = `Repair the current ${repairKind} compiler diagnostics with the smallest safe source change.`;
-  }
-  const thread = document.createElement('div');
-  thread.className = 'ai-thread';
-  thread.setAttribute('aria-live', 'polite');
-  const text = document.createElement('textarea');
-  text.className = 'obj-in ai-brief';
-  text.readOnly = true;
-  text.value = brief;
-  text.setAttribute('aria-label', 'AI effect brief');
-  const actions = document.createElement('div');
-  actions.className = 'btn-row';
-  const copy = document.createElement('button');
-  copy.type = 'button';
-  copy.className = 'btn btn-accent';
-  copy.textContent = 'Copy AI request';
-  copy.addEventListener('click', async () => {
-    let request;
-    try {
-      request = buildWorkflowRequest({
-        workflow: workflow.value, prompt: prompt.value, data: currentData(),
-        diagnostics: collectAiDiagnostics(app),
-      });
-    } catch (error) {
-      prompt.focus();
-      toast(error.message);
-      return;
-    }
-    const message = document.createElement('div');
-    message.className = 'ai-message ai-message-user';
-    message.textContent = prompt.value.trim();
-    thread.append(message);
-    try {
-      await navigator.clipboard.writeText(request);
-      toast('AI request copied');
-    } catch {
-      text.focus();
-      text.value = request;
-      text.select();
-      toast('Select and copy the generated request');
-    }
-  });
-  const download = document.createElement('button');
-  download.type = 'button';
-  download.className = 'btn';
-  download.textContent = 'Download .md';
-  download.addEventListener('click', () => downloadBlob(
-    new Blob([brief], { type: 'text/markdown' }),
-    `${(app.name || 'effect').replace(/[^\w-]+/g, '_')}.particletoy-ai.md`,
-  ));
-  actions.append(copy, download);
-  const briefSection = document.createElement('details');
-  briefSection.className = 'section dialog-section';
-  const briefSummary = document.createElement('summary');
-  briefSummary.textContent = 'Inspect current effect brief';
-  const briefBody = document.createElement('div');
-  briefBody.className = 'section-body';
-  briefBody.append(text);
-  briefSection.append(briefSummary, briefBody);
-  const patchSection = document.createElement('details');
-  patchSection.className = 'section dialog-section';
-  const patchSummary = document.createElement('summary');
-  patchSummary.textContent = 'Preview an AI patch';
-  const patchBody = document.createElement('div');
-  patchBody.className = 'section-body';
-  const patchIntro = document.createElement('p');
-  patchIntro.className = 'muted';
-  patchIntro.textContent = 'Paste a version 1 operation document. Nothing changes until you inspect the preview and press Apply.';
-  const patchText = document.createElement('textarea');
-  patchText.className = 'obj-in ai-patch';
-  patchText.placeholder = '{"version":1,"summary":"…","operations":[{"op":"replace","path":"/scene/bloom","value":1}]}';
-  patchText.setAttribute('aria-label', 'AI patch JSON');
-  const preview = document.createElement('button');
-  preview.type = 'button';
-  preview.className = 'btn';
-  preview.textContent = 'Preview patch';
-  const result = document.createElement('pre');
-  result.className = 'ai-patch-preview';
-  const apply = document.createElement('button');
-  apply.type = 'button';
-  apply.className = 'btn btn-accent hidden';
-  let pending = null;
-  preview.addEventListener('click', () => {
-    apply.classList.add('hidden');
-    pending = null;
-    try {
-      const before = JSON.stringify(currentData());
-      const patch = parseAiPatch(patchText.value);
-      const patched = validateWorkflowPatch(JSON.parse(before), patch, workflow.value);
-      result.textContent = `${patch.summary || 'AI patch'}\n\n${describeAiChanges(patched.changes)}`;
-      const message = document.createElement('div');
-      message.className = 'ai-message ai-message-assistant';
-      message.textContent = `${patch.summary || 'AI patch'} — ${patched.changes.length} proposed change${patched.changes.length === 1 ? '' : 's'}`;
-      thread.append(message);
-      pending = { before, effect: patched.effect, count: patched.changes.length };
-      apply.textContent = `Apply ${patched.changes.length} change${patched.changes.length === 1 ? '' : 's'}`;
-      apply.classList.remove('hidden');
-    } catch (error) {
-      result.textContent = `Cannot preview: ${error.message}`;
-    }
-  });
-  apply.addEventListener('click', () => {
-    if (!pending) return;
-    if (JSON.stringify(currentData()) !== pending.before) {
-      result.textContent = 'The effect changed after this preview. Preview the patch again before applying it.';
-      apply.classList.add('hidden');
-      pending = null;
-      return;
-    }
-    history.record(apply);
-    applyData(pending.effect);
-    history.flush();
-    toast(`Applied ${pending.count} AI patch change${pending.count === 1 ? '' : 's'} — Undo is available`);
-    result.textContent += '\n\nApplied. Use Undo to revert.';
-    apply.classList.add('hidden');
-    pending = null;
-  });
-  const providerSection = document.createElement('details');
-  providerSection.className = 'section dialog-section';
-  const providerSummary = document.createElement('summary');
-  providerSummary.textContent = 'Optional secure provider';
-  const providerBody = document.createElement('div');
-  providerBody.className = 'section-body';
-  const providerIntro = document.createElement('p');
-  providerIntro.className = 'muted';
-  providerIntro.textContent = 'Enter a server-side adapter URL, never a model API key. The adapter returns the same validated patch used by clipboard mode.';
-  const endpoint = document.createElement('input');
-  endpoint.className = 'text-in';
-  endpoint.type = 'url';
-  endpoint.placeholder = 'https://your-server.example/particletoy-ai';
-  endpoint.value = localStorageRef?.getItem('particletoy.aiProviderEndpoint') || '';
-  endpoint.setAttribute('aria-label', 'AI provider endpoint');
-  const ask = document.createElement('button');
-  ask.type = 'button';
-  ask.className = 'btn';
-  ask.textContent = 'Ask provider';
-  ask.addEventListener('click', async () => {
-    let request;
-    try {
-      request = buildWorkflowRequest({
-        workflow: workflow.value, prompt: prompt.value, data: currentData(),
-        diagnostics: collectAiDiagnostics(app),
-      });
-    }
-    catch (error) { prompt.focus(); toast(error.message); return; }
-    ask.disabled = true;
-    ask.textContent = 'Waiting…';
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 45_000);
-      let patch;
-      try {
-        patch = await requestAiPatch({ endpoint: endpoint.value, request, signal: controller.signal });
-      } finally { clearTimeout(timeout); }
-      localStorageRef?.setItem('particletoy.aiProviderEndpoint', endpoint.value.trim());
-      patchText.value = JSON.stringify(patch, null, 2);
-      preview.click();
-      patchSection.open = true;
-      patchSection.scrollIntoView({ block: 'nearest' });
-      toast('Provider patch is ready to review');
-    } catch (error) {
-      toast(error.name === 'AbortError' ? 'Provider request timed out' : error.message);
-    } finally {
-      ask.disabled = false;
-      ask.textContent = 'Ask provider';
-    }
-  });
-  providerBody.append(providerIntro, endpoint, ask);
-  providerSection.append(providerSummary, providerBody);
-  patchBody.append(patchIntro, patchText, preview, result, apply);
-  patchSection.append(patchSummary, patchBody);
-  wrap.append(intro, workflow, diagnosticNote, promptLabel, prompt, actions, thread, providerSection, briefSection, patchSection);
-  modal('AI Assist', wrap, { wide: true });
 }
 
 function showLibrary() {
@@ -1297,13 +990,6 @@ function frame(now) {
   if (app.playing) {
     const dt = rawDt * app.timeScale;
     app.time += dt;
-    if (verseRuntime) {
-      const verseResult = verseRuntime.tick(dt);
-      if (verseResult.error) {
-        toast(`Particle Verse stopped at line ${verseResult.error.line}: ${verseResult.error.message}`, 8000);
-        verseRuntime = null;
-      }
-    }
     for (const em of app.emitters) em.step(dt);
   }
 

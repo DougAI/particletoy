@@ -123,12 +123,6 @@ export class Emitter {
     if (this.simRt) this.simRt.resetPending = true;
   }
 
-  requestBurst(count) {
-    let remaining = Math.max(0, Math.min(10_000, count | 0));
-    if (this.p.simMode === 'shader') this._pendingSpawn += remaining;
-    else while (remaining-- > 0 && this.count < this.capacity) this._spawnOne();
-  }
-
   /** Advance simulation by dt seconds (already time-scaled). */
   step(dt) {
     const p = this.p;
