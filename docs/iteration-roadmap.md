@@ -9,28 +9,28 @@ deployment, and include a focused automated or browser-level check.
 
 ## Mobile foundation
 
-1. **Workspace navigation** — switch between full-size Preview, Inspect, and Code views
+1. **Workspace navigation** ✅ — switch between full-size Preview, Inspect, and Code views
    on narrow screens without disturbing the desktop split layout.
-2. **Compact command bar** — keep playback and primary save/share actions reachable while
+2. **Compact command bar** ✅ — keep playback and primary save/share actions reachable while
    moving infrequent commands into an overflow sheet.
-3. **Touch camera controls** — document and support one-finger orbit plus two-finger pan
+3. **Touch camera controls** ✅ — document and support one-finger orbit plus two-finger pan
    and zoom without fighting page gestures.
-4. **Touch-sized inspector** — enlarge targets, make property rows reflow, and keep numeric
+4. **Touch-sized inspector** ✅ — enlarge targets, make property rows reflow, and keep numeric
    controls usable with the software keyboard open.
-5. **Precision curve editing** — add selection, nudge, and delete affordances that do not
+5. **Precision curve editing** ✅ — add selection, nudge, and delete affordances that do not
    depend on hover or right-click.
-6. **Responsive dialogs** — make library, publish, import, export, and help flows fit safe
+6. **Responsive dialogs** ✅ — make library, publish, import, export, and help flows fit safe
    areas and small landscape screens.
-7. **Adaptive render quality** — scale resolution and expensive effects against measured
+7. **Adaptive render quality** ✅ — scale resolution and expensive effects against measured
    frame time, with a manual override.
-8. **Installable/offline shell** — add a manifest and conservative service worker for the
+8. **Installable/offline shell** ✅ — add a manifest and conservative service worker for the
    static editor shell while keeping shared and published data network-aware.
 
 ## AI-assisted creation
 
-9. **Effect brief** — generate a structured, copyable description of the current effect
+9. **Effect brief** ✅ — generate a structured, copyable description of the current effect
    and the particletoy schema for use with any assistant.
-10. **Safe patch preview** — validate and display an AI-proposed effect patch before the
+10. **Safe patch preview** ✅ — validate and display an AI-proposed effect patch before the
     user applies it; never execute arbitrary returned JavaScript.
 11. **Prompt workspace** ✅ — add an in-editor conversation surface that can operate in
     clipboard mode before any provider is configured.
